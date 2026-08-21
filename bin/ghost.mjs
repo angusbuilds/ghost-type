@@ -31,6 +31,8 @@ import { Governor } from '../src/governor.mjs';
 import { recordLineage } from '../src/lineage.mjs';
 import { selectableSessions } from '../src/sessions.mjs';
 import { loadConfig, nightDeadlineMs } from '../src/config.mjs';
+import { checkEnv, renderDoctor } from '../src/doctor.mjs';
+import { realOnBattery, realFreeDiskGB } from '../src/daemon.mjs';
 import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
 import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
 
@@ -237,6 +239,16 @@ async function main() {
       } finally { cleanup(); }
       break;
     }
+    case 'doctor': {
+      const has = (bin) => { try { execFileSync('/bin/sh', ['-c', `command -v ${bin}`], { stdio: 'ignore' }); return true; } catch { return false; } };
+      let claudeVersion = ''; try { claudeVersion = execFileSync(CLAUDE_BIN, ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().match(/[\d.]+/)?.[0] || ''; } catch { /* absent */ }
+      const dcgPresent = has('dcg') || fs.existsSync(`${HOME}/.claude/hooks/guard.py`);
+      const result = checkEnv({ has, claudeVersion, onBattery: realOnBattery, freeDiskGB: realFreeDiskGB, dcgPresent });
+      console.log('\n👻 Ghost Type — environment check\n');
+      console.log(renderDoctor(result));
+      console.log('');
+      process.exit(result.fatalFail ? 1 : 0);
+    }
     case 'off': { disarm(); console.log('👻 disarmed.'); break; }
     case 'status': {
       const st = readState();
@@ -263,6 +275,8 @@ async function main() {
       console.log('  ghost scan [devRoot]                 list projects + test runners');
       console.log('  ghost learn                          build your voice profile');
       console.log('  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight');
+      console.log('  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"');
+      console.log('  ghost doctor                         check the environment is ready');
       console.log('  ghost off | status | queue | report');
   }
 }
