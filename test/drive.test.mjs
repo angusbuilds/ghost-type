@@ -95,3 +95,19 @@ test('hauntDrive stops when the pane dies', async () => {
   const out = await hauntDrive({ paneId: '%3', goal: 'g', deps: d, pollMs: 0 });
   assert.equal(out.reason, 'pane-gone');
 });
+
+test('hauntDrive waits for minStable identical polls before injecting (H2)', async () => {
+  let sent = 0, listCalls = 0, n = 0;
+  // pane output changes every poll → never stable → must never inject; pane dies after 5 polls
+  const d = deps({
+    runner: (...a) => {
+      if (a[0] === 'list-panes') return (listCalls++ < 5) ? '%3' : '';   // gone after 5 polls
+      return 'moving ' + (n++);                                          // output never repeats
+    },
+    sendKeys: () => { sent++; },
+  });
+  const out = await hauntDrive({ paneId: '%3', goal: 'g', deps: d, pollMs: 0, minStable: 3 });
+  assert.equal(out.reason, 'pane-gone');
+  assert.equal(out.injects, 0);   // never stable → never injected
+  assert.equal(sent, 0);
+});
