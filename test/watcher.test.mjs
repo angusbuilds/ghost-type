@@ -35,3 +35,13 @@ test('a nonzero exit with no result and no network text is errored, not network 
   const o = classifyOutcome({ exitCode: 127, result: null, text: 'command not found: claude', nowMs: NOW });
   assert.equal(o.state, 'errored');
 });
+
+test('a bare "resets in" without a limit keyword is NOT a rate-limit (round 5 #4)', () => {
+  const o = classifyOutcome({ exitCode: 0, result: { subtype: 'error', result: 'cache entry resets in 60s' }, text: 'cache entry resets in 60s', nowMs: NOW });
+  assert.equal(o.state, 'stalled');   // not rate-limited — no usage/rate/quota/limit nearby
+});
+
+test('a crash mentioning "rate limit" is transport-errored, not rate-limited (round 5 L2)', () => {
+  const o = classifyOutcome({ exitCode: 1, result: null, text: 'Error: implemented rate limit handling but crashed', nowMs: NOW });
+  assert.equal(o.state, 'errored');   // nonzero + no result → transport, decided before rate text
+});

@@ -23,3 +23,11 @@ test('long prompts are truncated in the table', () => {
   l.record({ iteration: 1, prompt: 'x'.repeat(500), outcome: 'fail', exitCode: 1, stderrHead: '', howClose: '' });
   assert.ok(l.toTable().length < 500 + 200);
 });
+
+test('a pipe in captured stderr is escaped so it cannot break the table (round 5 #2)', () => {
+  const l = new Ledger();
+  l.record({ iteration: 1, prompt: 'run', outcome: 'fail', exitCode: 1, stderrHead: 'grep foo | wc -l → 3', howClose: 'a | b' });
+  const row = l.toTable().split('\n').at(-1);
+  assert.equal(row.replace(/\\\|/g, '').split('|').length, 7);   // leading + 5 cells + trailing
+  assert.match(l.toTable(), /grep foo \\\| wc/);                 // the pipe was escaped
+});

@@ -60,3 +60,12 @@ test('lineage records and renders prompt history', () => {
   assert.match(md, /fix the lexer/);
   assert.match(md, /shipped/);
 });
+
+test('a truncated trailing line does not discard the whole lineage (round 5 #3)', () => {
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lin-')), 'lineage.jsonl');
+  recordLineage(f, { iteration: 1, prompt: 'good row', outcome: 'fail' });
+  fs.appendFileSync(f, '{"iteration":2,"prompt":"trunc');   // crash mid-append — no newline, invalid JSON
+  const entries = readLineage(f);
+  assert.equal(entries.length, 1);              // the valid row survives...
+  assert.equal(entries[0].prompt, 'good row');  // ...instead of the whole file being dropped
+});

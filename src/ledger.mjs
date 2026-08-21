@@ -19,9 +19,13 @@ export class Ledger {
 
   toTable() {
     if (this.rows.length === 0) return '(no attempts yet)';
+    // Escape `|` too, not just newlines — a pipe in captured stderr (shell pipelines, ASCII
+    // tables) would otherwise shift columns and garble the "already tried" record the writer
+    // relies on (round 5 review #2, matching lineage.mjs/report.mjs).
+    const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
     const head = '| # | outcome | prompt | error | how close |\n|---|---|---|---|---|';
     const body = this.rows.map(r =>
-      `| ${r.iteration} | ${r.outcome} | ${r.prompt.replace(/\n/g, ' ')} | ${r.stderrHead} | ${r.howClose} |`
+      `| ${r.iteration} | ${cell(r.outcome)} | ${cell(r.prompt)} | ${cell(r.stderrHead)} | ${cell(r.howClose)} |`
     ).join('\n');
     return `${head}\n${body}`;
   }

@@ -10,9 +10,13 @@ export function recordLineage(file, entry) {
 }
 
 export function readLineage(file) {
-  try {
-    return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
-  } catch { return []; }
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }   // absent file → empty
+  // Parse each line independently — a single truncated tail (process killed mid-append during
+  // a crash/sleep) must not discard the whole audit trail (round 5 review #3).
+  return raw.trim().split('\n').filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
 }
 
 // Markdown lineage table for the report: iteration → prompt → what it led to.
