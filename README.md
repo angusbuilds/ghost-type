@@ -92,7 +92,7 @@ A hand-built explainer with cinematic clips (generated via Higgsfield) lives in
 ```bash
 git clone https://github.com/hangryclaude/ghost-type
 cd ghost-type
-node --test          # 152 tests, all offline — spends no tokens
+node --test          # 196 tests, all offline — spends no tokens
 ```
 
 Run one real card end-to-end against a scratch repo (this is the live smoke test):
@@ -177,7 +177,7 @@ see [`examples/config.example.json`](examples/config.example.json). The native m
 ✅  haunt mode        select a terminal from the menu bar → it turns purple → it drives it
 ✅  report            theme-aware HTML · morning push notification · prompt lineage
 
-152 tests, all offline (`node --test`) · audited by Codex (gpt-5.6-sol, 15 findings fixed)
+196 tests, all offline (`node --test`) · independently audited by Codex (gpt-5.6-sol, xhigh) across five rounds — every finding fixed
 ```
 
 Ghost Type never trusts a "done" claim — it re-runs the test itself and flags a

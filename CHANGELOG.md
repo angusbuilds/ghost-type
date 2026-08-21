@@ -55,8 +55,24 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
   notification fires even if the report render fails; report cells/fences are escaped; a
   detected test runner counts as runnable only if its executable resolves.
 
+### Hardening (round 5)
+- **One verifier for every entrypoint** — the packaged `ghost-run-card` runner had shipped with
+  no deletion guard; both runners now share `verifyCard`, so no path can accept a destructive diff.
+- **Secrets actually scrubbed** — full PEM private-key blocks (not just the header) and Stripe
+  `sk_live_`/`sk_test_` keys are redacted; the untrusted-data fence defangs any forged inner boundary.
+- **Runaway protection** — engine calls stream into byte-capped buffers under a wall-clock deadline
+  that kills the whole process group; acceptance tests drain both streams (a chatty stdout no longer
+  deadlocks) and surface stdout diagnostics.
+- **Credential isolation** — a session receives only the selected engine's provider keys (Codex never
+  sees Anthropic keys, nor Claude OpenAI's).
+- **Data-loss & accounting** — orphaned clones from a crashed night are preserved, not reaped; a
+  crashed call's real cost is still metered; backpressure counts only unmerged branches.
+- **Prompt-path bounds & injection** — voice profile, exemplars, ledger, and the whole assembled
+  prompt are capped; a failed writer call can't become a candidate; the vote index parses robustly;
+  aborted live injection clears stranded text with Ctrl-U (shell only).
+
 ### Proof
-- 173 offline unit tests (`node --test`), zero runtime dependencies.
+- 196 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. a committed-deletion attack.
 - A live smoke shipped a real feature end-to-end with real tokens, main untouched.
 - Independently audited by Codex (`gpt-5.6-sol`, xhigh) across five rounds — each round
