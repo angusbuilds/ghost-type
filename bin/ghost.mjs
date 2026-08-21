@@ -103,8 +103,9 @@ function cardDeps(card, voice) {
       if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '-m', `ghost: ${String(card.goal).slice(0, 60)}`); }
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
-    // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1).
-    verify: (c, clonePath, opts) => verifyCard(c, clonePath, opts),
+    // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1);
+    // acceptance runs in the OS sandbox when configured (round 8: opt-in for untrusted repos).
+    verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: CONFIG.sandboxAcceptance }),
     classifyClaim, diagnoseFailure, generateCandidates, voteBest, writeNextPrompt,
     voiceProfile: voice.profile,
     exemplars: exemplarsFor(voice.bank, card.situation || 'kickoff'),

@@ -10,7 +10,8 @@
     "backpressureThreshold": "integer >= 1 — unmerged ghost/* branches before a project is paused",
     "pollMs": "integer 250-600000 — haunt-drive poll interval",
     "minStable": "integer >= 2 — consecutive stable polls before a pane counts as idle",
-    "defaultEngine": "\"claude\" or \"codex\""
+    "defaultEngine": "\"claude\" or \"codex\"",
+    "sandboxAcceptance": "boolean — wrap acceptance tests in a macOS network/credential jail (for UNTRUSTED repos; breaks tests that need the network)"
   },
   "maxTokensNight": 2000000,
   "maxCostUsd": 10,
@@ -21,5 +22,6 @@
   "backpressureThreshold": 3,
   "pollMs": 5000,
   "minStable": 2,
-  "defaultEngine": "claude"
+  "defaultEngine": "claude",
+  "sandboxAcceptance": false
 }

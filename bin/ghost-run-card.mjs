@@ -10,6 +10,7 @@ import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
+import { loadConfig } from '../src/config.mjs';
 import { renderReport } from '../src/report.mjs';
 import { WORK_DIR } from '../src/lib.mjs';
 import { execFileSync } from 'node:child_process';
@@ -51,8 +52,8 @@ const deps = {
     excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000),
   }),
   // Shared verifier — includes the deletion guard, so this packaged runner can't ship a
-  // destructive diff on a passing test (round 5 H1).
-  verify: (c, clonePath, opts) => verifyCard(c, clonePath, opts),
+  // destructive diff on a passing test (round 5 H1); sandbox the acceptance test when configured.
+  verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: loadConfig().sandboxAcceptance }),
   classifyClaim,
   diagnoseFailure,
   generateCandidates,

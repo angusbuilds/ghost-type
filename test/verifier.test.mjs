@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sandboxWrap } from '../src/verifier.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -103,6 +103,22 @@ test('verifyCard refuses a destructive diff even when the test passes (round 5 H
   assert.equal(v.pass, false);
   assert.match(v.detail.testOutput, /net-negative|refusing/);
   fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('sandboxWrap wraps in sandbox-exec on macOS, no-ops elsewhere (round 8 opt-in sandbox)', () => {
+  const wrapped = sandboxWrap(['npm', 'test'], { home: '/Users/x', platform: 'darwin' });
+  assert.equal(wrapped[0], 'sandbox-exec');
+  assert.equal(wrapped[1], '-p');
+  assert.match(wrapped[2], /\(deny network\*\)/);
+  assert.match(wrapped[2], /\/Users\/x\/\.ssh/);
+  assert.deepEqual(wrapped.slice(-2), ['npm', 'test']);   // original command preserved at the tail
+  // off macOS it's a no-op (sandbox-exec doesn't exist)
+  assert.deepEqual(sandboxWrap(['npm', 'test'], { platform: 'linux' }), ['npm', 'test']);
+});
+
+test('runAcceptance under the sandbox still passes a normal (non-network) test', { skip: process.platform !== 'darwin' }, async () => {
+  const r = await runAcceptance(['node', '-e', 'process.exit(0)'], process.cwd(), 15, undefined, true);
+  assert.equal(r.pass, true);   // the jail doesn't break an ordinary test
 });
 
 test('verifyCard passes a clean additive diff (round 5 H1)', async () => {

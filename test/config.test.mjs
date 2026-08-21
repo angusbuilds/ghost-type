@@ -52,6 +52,12 @@ test('midnight (hour 0) is a VALID deadline and a real engine name survives (rou
   assert.equal(cfg.defaultEngine, 'codex');
 });
 
+test('sandboxAcceptance is a boolean flag, default off (round 8)', () => {
+  assert.equal(DEFAULTS.sandboxAcceptance, false);
+  assert.equal(loadConfig(tmpCfg({ sandboxAcceptance: true })).sandboxAcceptance, true);
+  assert.equal(loadConfig(tmpCfg({ sandboxAcceptance: 'yes' })).sandboxAcceptance, false);   // non-boolean rejected
+});
+
 test('the shipped example config documents every real knob and loads cleanly', () => {
   const example = JSON.parse(fs.readFileSync(new URL('../examples/config.example.json', import.meta.url)));
   for (const k of Object.keys(DEFAULTS)) {
