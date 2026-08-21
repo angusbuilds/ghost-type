@@ -37,6 +37,23 @@ test('makeClone produces an isolated clone with no origin remote', () => {
   fs.rmSync(src, { recursive: true, force: true });
 });
 
+test('makeClone QUARANTINES an existing same-name clone instead of deleting it (round 6 #4)', () => {
+  const src = tmpRepo();
+  const taskId = 'quar-' + process.pid;
+  const clone = makeClone(src, taskId);
+  // simulate crashed, unbranched work left in the clone from a prior run
+  fs.writeFileSync(path.join(clone, 'CRASHED_WORK.txt'), 'unsaved progress');
+  // a same-night restart regenerates the same taskId → must NOT destroy that work
+  makeClone(src, taskId);
+  const parent = path.dirname(clone);
+  const quarantined = fs.readdirSync(parent).find(n => n.startsWith(`${taskId}.crashed-`));
+  assert.ok(quarantined, 'the prior clone was quarantined, not deleted');
+  assert.ok(fs.existsSync(path.join(parent, quarantined, 'CRASHED_WORK.txt')), 'crashed work preserved');
+  fs.rmSync(clone, { recursive: true, force: true });
+  fs.rmSync(path.join(parent, quarantined), { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
+});
+
 test('clone objects do NOT share inodes with the source (no-hardlinks isolation)', () => {
   const src = tmpRepo();
   const clone = makeClone(src, 'inode-' + process.pid);
