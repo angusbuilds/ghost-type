@@ -1,0 +1,12 @@
+{
+  "project": "sitecraft",
+  "repoPath": "/Users/you/dev/sitecraft",
+  "goal": "make the gallery lazy-load images below the fold",
+  "acceptanceArgv": ["npm", "test"],
+  "acceptanceTimeoutSec": 600,
+  "branch": "ghost/2026-08-21-gallery",
+  "maxIterations": 6,
+  "maxTurns": 40,
+  "maxBudgetUsd": 4.0,
+  "situation": "kickoff"
+}
