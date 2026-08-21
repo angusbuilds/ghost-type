@@ -4,17 +4,18 @@ import assert from 'node:assert/strict';
 import { parsePanes, isAgentSession, listSessions, selectableSessions } from '../src/sessions.mjs';
 
 const SAMPLE = [
-  '%3\tmain\t0.0\tclaude\tghost-type — claude',
-  '%4\tmain\t1.0\tzsh\t~/dev',
-  '%7\twork\t0.1\tcodex\tcodex exec',
-  '%9\tmisc\t0.0\ttop\t',
+  '%3\tmain\t0.0\tclaude\tclaude\tghost-type — claude',
+  '%4\tmain\t1.0\tzsh\tzsh\t~/dev',
+  '%7\twork\t0.1\tcodex\tcodex\tcodex exec',
+  '%9\tmisc\t0.0\ttop\ttop\t',
 ].join('\n');
 
-test('parsePanes structures each pane with a tmux target', () => {
+test('parsePanes structures each pane with a tmux target + window name', () => {
   const panes = parsePanes(SAMPLE);
   assert.equal(panes.length, 4);
   assert.equal(panes[0].paneId, '%3');
   assert.equal(panes[0].target, 'main:0.0');
+  assert.equal(panes[0].windowName, 'claude');
   assert.equal(panes[2].cmd, 'codex');
 });
 

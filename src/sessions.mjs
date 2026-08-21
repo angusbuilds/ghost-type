@@ -5,7 +5,7 @@
 // so this is testable offline.
 import { execFileSync } from 'node:child_process';
 
-const FMT = '#{pane_id}\t#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_title}';
+const FMT = '#{pane_id}\t#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{window_name}\t#{pane_title}';
 
 function realTmux(...args) {
   return execFileSync('tmux', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
@@ -14,9 +14,18 @@ function realTmux(...args) {
 // Parse `tmux list-panes -a -F <FMT>` output into structured sessions.
 export function parsePanes(text) {
   return String(text).split('\n').map(l => l.trim()).filter(Boolean).map(line => {
-    const [paneId, session, loc, cmd, ...titleParts] = line.split('\t');
-    return { paneId, session, loc, cmd, title: titleParts.join('\t') || '', target: `${session}:${loc}` };
+    const [paneId, session, loc, cmd, windowName, ...titleParts] = line.split('\t');
+    return { paneId, session, loc, cmd, windowName: windowName || '', title: titleParts.join('\t') || '', target: `${session}:${loc}` };
   });
+}
+
+// A short human name for the pane, for the menu-bar label. Prefer a custom window name,
+// else the running command, else the tmux target.
+export function paneName(p) {
+  const w = (p.windowName || '').trim();
+  if (w && w !== p.cmd && !/^\d/.test(w)) return w;   // a real, named window
+  if (p.cmd && p.cmd !== 'zsh' && p.cmd !== 'bash') return p.cmd;
+  return p.target;
 }
 
 // True when a pane is actually running a coding agent Ghost Type can drive — the panes

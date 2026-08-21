@@ -4,8 +4,11 @@
 // (two-step send), never type while the human is active, never type into a dead/changed
 // pane. All side-effecting calls are injected so the logic is testable offline.
 import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { writeNextPrompt } from './prompt-writer.mjs';
 import { loadVoice, exemplarsFor } from './voice.mjs';
+import { runEngine } from './engine.mjs';
+import { buildSessionEnv } from './env.mjs';
 
 const TMUX = process.env.GHOST_TMUX_BIN || 'tmux';
 const tmux = (...a) => execFileSync(TMUX, a, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
@@ -84,5 +87,11 @@ export async function hauntDrive({ paneId, goal, deps, maxInjects = 20, pollMs =
 }
 
 export function defaultDriveDeps({ engine = 'claude' } = {}) {
-  return { runner: tmux, sendKeys: realSendKeys, humanIdleSecs: realHumanIdleSecs, engine, voice: loadVoice() };
+  // The writer engine must be a CALLABLE that returns {text} — a read-only headless
+  // claude -p that only composes the next prompt (it never touches the driven pane).
+  const writerEngine = async ({ prompt }) => {
+    const r = await runEngine({ cwd: os.homedir(), prompt, allowedTools: 'Read', maxTurns: 1, maxBudgetUsd: 1, env: buildSessionEnv() });
+    return { text: r.text };
+  };
+  return { runner: tmux, sendKeys: realSendKeys, humanIdleSecs: realHumanIdleSecs, engine: writerEngine, voice: loadVoice() };
 }
