@@ -140,6 +140,25 @@ test('injectPrompt skips Enter when beforeEnter fails after the pause (round 4 #
   assert.deepEqual(calls, ['keep going']);   // text was typed, but Enter was NOT sent into a changed world
 });
 
+test('driveStep clears stranded text with Ctrl-U when the agent exits to a shell mid-delay (round 5 H3)', async () => {
+  // agent recognized on the first pass; by the time beforeEnter runs, the pane is a bare shell.
+  let cmdCall = 0;
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
+    runner: (...a) => {
+      if (a[0] === 'list-panes') return '%3';
+      if (a[0] === 'display-message') return (++cmdCall <= 4) ? 'claude' : 'zsh';   // agent through recheck, shell in beforeEnter
+      return 'agent output here';
+    },
+    sendKeys: (id, k) => sent.push(k), humanIdleSecs: () => 999,
+    engine: async () => ({ text: 'do the next thing' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'aborted');
+  assert.ok(!sent.includes('Enter'), 'never pressed Enter into the shell');
+  assert.ok(sent.includes('C-u'), 'cleared the stranded line');
+});
+
 test('driveStep keeps polling (does not terminate) while a subprocess/tool runs (round 4 #5)', async () => {
   // foreground is `git` (a tool the agent spawned) — neither shell nor agent → 'working', never 'shell'.
   const sent = [];

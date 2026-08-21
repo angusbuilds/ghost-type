@@ -26,3 +26,18 @@ test('voteBest falls back to the first candidate on unparseable judge output', a
   const { index } = await voteBest({ candidates: ['a', 'b'], context: 'ctx', engine });
   assert.equal(index, 0);
 });
+
+test('voteBest survives trailing prose after the JSON object (round 5 #8)', async () => {
+  const engine = async () => ({ text: '{"choice": 1, "reason": "clear"}\n\nI picked it because {it is best}.' });
+  const { index, choice } = await voteBest({ candidates: ['a', 'b', 'c'], context: 'ctx', engine });
+  assert.equal(index, 1);       // greedy match would have swallowed the trailing "}" and voted 0
+  assert.equal(choice, 'b');
+});
+
+test('a transport-failed writer call is NOT used as a candidate or a vote (round 5 M5)', async () => {
+  const failing = async () => ({ exitCode: 1, result: null, text: 'network unreachable after retries' });
+  const cands = await generateCandidates({ context: 'g', n: 3, engine: failing });
+  assert.deepEqual(cands, []);   // the error string never becomes a candidate
+  const { index } = await voteBest({ candidates: ['a', 'b'], context: 'ctx', engine: failing });
+  assert.equal(index, 0);        // a failed vote falls back, doesn't parse the error text
+});
