@@ -4,7 +4,7 @@
 // full-corpus clustering pipeline is later.
 import fs from 'node:fs';
 import path from 'node:path';
-import { GHOST_HOME } from './lib.mjs';
+import { GHOST_HOME, byteCap } from './lib.mjs';
 import { fence } from './sanitize.mjs';
 import { collectPrompts } from './transcript.mjs';
 
@@ -65,8 +65,11 @@ export function sampleRecent(prompts, n = 200) {
 
 // Distill a voice-profile.md via the injected engine. The owner's own prompts are still
 // fenced as data (never instructions) so a past prompt can't hijack the distillation.
-export async function distillVoiceProfile({ prompts, engine }) {
-  const sample = prompts.map(p => `- ${p.text}`).join('\n');
+export async function distillVoiceProfile({ prompts, engine, maxEach = 500, maxTotalBytes = 40_000 }) {
+  // Cap each prompt AND the whole sample — his real history has monster pasted prompts
+  // (the longest is 650KB), and voice lives in the short ones anyway. Keeps the distill
+  // call bounded and cheap, and can't blow the context window.
+  const sample = byteCap(prompts.map(p => `- ${byteCap(String(p.text).replace(/\n+/g, ' '), maxEach)}`).join('\n'), maxTotalBytes);
   const r = await engine({
     prompt: [
       "You are building a VOICE PROFILE of a developer from a sample of prompts they actually typed to coding agents. Capture how THEY write instructions so another system can draft prompts that sound like them.",

@@ -55,6 +55,14 @@ test('learn reads a transcript dir, distills via injected engine, writes files',
   fs.rmSync(out, { recursive: true, force: true });
 });
 
+test('distillVoiceProfile bounds a monster prompt so the call stays cheap', async () => {
+  const { distillVoiceProfile } = await import('../src/voice.mjs');
+  let seenLen = 0;
+  const engine = async ({ prompt }) => { seenLen = prompt.length; return { text: '## Summary\nx' }; };
+  await distillVoiceProfile({ prompts: [{ text: 'x'.repeat(700000) }, { text: 'gooo' }], engine });
+  assert.ok(seenLen < 45000, `sample was capped (${seenLen} bytes)`);   // not 700KB
+});
+
 test('loadVoice returns safe defaults when unlearned', () => {
   const v = loadVoice('/nonexistent/voice/dir');
   assert.match(v.profile, /direct|terse/);
