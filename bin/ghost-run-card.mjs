@@ -5,7 +5,7 @@ import { loadCard } from '../src/card.mjs';
 import { runCard } from '../src/spine.mjs';
 import { makeClone, fetchBranchBack } from '../src/clone.mjs';
 import { runEngine } from '../src/engine.mjs';
-import { runAcceptance, patchApplied, classifyClaim } from '../src/verifier.mjs';
+import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const card = loadCard(process.argv[2]);
-const env = buildSessionEnv();
+const env = buildSessionEnv([], process.env, card.engine);   // scope creds to the card's engine (round 5 M9)
 const allowedTools = allowedToolsFor(card.acceptanceArgv);
 const git = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
 
@@ -45,10 +45,9 @@ const deps = {
     stat: git(cwd, 'diff', '--shortstat', 'HEAD'),
     excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000),
   }),
-  verify: async (c, clonePath) => {
-    const r = await runAcceptance(c.acceptanceArgv, clonePath, c.acceptanceTimeoutSec);
-    return { pass: r.pass, detail: { testOutput: r.pass ? 'acceptance passed (exit 0)' : r.stderrHead } };
-  },
+  // Shared verifier — includes the deletion guard, so this packaged runner can't ship a
+  // destructive diff on a passing test (round 5 H1).
+  verify: (c, clonePath, opts) => verifyCard(c, clonePath, opts),
   classifyClaim,
   diagnoseFailure,
   generateCandidates,

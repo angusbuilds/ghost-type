@@ -1,14 +1,18 @@
 // src/env.mjs
 
-// Pass-through vars a coding session legitimately needs. Everything else is dropped
+// Non-credential vars any coding session legitimately needs. Everything else is dropped
 // unless the card explicitly re-admits it via extraAllow.
-const BASE_ALLOW = new Set([
-  'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR',
-  'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'NODE_ENV',
-]);
+const COMMON_ALLOW = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'NODE_ENV'];
 
-export function buildSessionEnv(extraAllow = [], src = process.env) {
-  const allow = new Set([...BASE_ALLOW, ...extraAllow]);
+// ONLY the selected engine's provider credentials are admitted — a Codex run must never
+// receive Anthropic keys, nor a Claude run receive OpenAI keys (round 5 M9).
+const ENGINE_CREDS = {
+  claude: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
+  codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
+};
+
+export function buildSessionEnv(extraAllow = [], src = process.env, engine = 'claude') {
+  const allow = new Set([...COMMON_ALLOW, ...(ENGINE_CREDS[engine] || ENGINE_CREDS.claude), ...extraAllow]);
   const out = {};
   for (const [k, v] of Object.entries(src)) if (allow.has(k)) out[k] = v;
   out.GHOST_SESSION = '1';

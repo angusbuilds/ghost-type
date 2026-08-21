@@ -8,16 +8,37 @@ import { fence, scrubSecrets } from './sanitize.mjs';
 export function runAcceptance(argv, cwd, timeoutSec) {
   return new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1), { cwd });
-    let err = '';
+    const CAP = 256 * 1024;
+    let out = '', outBytes = 0, err = '', errBytes = 0;
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutSec * 1000);
-    child.stderr.on('data', d => { err += d; });
+    // Drain BOTH streams, bounded. An unconsumed stdout fills the OS pipe buffer and deadlocks
+    // a chatty test into a false timeout (round 5 M1); and most runners (node --test, pytest)
+    // report failures on STDOUT, which the old code discarded — so capture it for the diagnostic.
+    child.stdout.on('data', d => { if (outBytes < CAP) { out += d; outBytes += d.length; } });
+    child.stderr.on('data', d => { if (errBytes < CAP) { err += d; errBytes += d.length; } });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ pass: !timedOut && code === 0, code, stderrHead: err.split('\n').slice(0, 5).join('\n'), timedOut });
+      const diag = [err.trim(), out.trim()].filter(Boolean).join('\n').split('\n').slice(0, 12).join('\n');
+      resolve({ pass: !timedOut && code === 0, code, stderrHead: diag, timedOut });
     });
     child.on('error', (e) => { clearTimeout(timer); resolve({ pass: false, code: null, stderrHead: String(e.message), timedOut }); });
   });
+}
+
+// Centralized acceptance + safety verification — EVERY runner MUST call this, so no entrypoint
+// can ship on a passing test alone while a destructive diff slips through (round 5 H1: the
+// packaged ghost-run-card runner had no deletion guard). `baseRef` lets the guard see committed
+// changes too (round 4 #1); `git` is injectable for tests.
+const gitOut = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
+export async function verifyCard(card, clonePath, { baseRef, git = gitOut } = {}) {
+  const r = await runAcceptance(card.acceptanceArgv, clonePath, card.acceptanceTimeoutSec);
+  if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead || 'test failed' } };
+  const stat = git(clonePath, 'diff', '--shortstat', baseRef || 'HEAD', '--').trim();
+  if (suspiciousDeletion(card.goal, stat)) {
+    return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
+  }
+  return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' } };
 }
 
 // Cheapest guard: did the working tree actually change vs the base commit the session

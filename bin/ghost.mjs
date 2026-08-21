@@ -19,7 +19,7 @@ import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, re
 import { runCard } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
-import { runAcceptance, patchApplied, classifyClaim, suspiciousDeletion } from '../src/verifier.mjs';
+import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
@@ -68,7 +68,7 @@ const dateStr = () => new Date().toISOString().slice(0, 10);
 const git = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
 
 function realEngine(card) {
-  const env = buildSessionEnv();
+  const env = buildSessionEnv([], process.env, card.engine);   // only this engine's creds (round 5 M9)
   const allowedTools = allowedToolsFor(card.acceptanceArgv || ['true']);
   // Dispatch by the card's engine. Coding calls get the shaped prompt + full tools; WRITER
   // calls (diagnosis/candidates/vote) get a read-only, tiny-budget model that can't touch
@@ -98,17 +98,8 @@ function cardDeps(card, voice) {
       if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '-m', `ghost: ${String(card.goal).slice(0, 60)}`); }
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
-    verify: async (c, clonePath, { baseRef } = {}) => {
-      const r = await runAcceptance(c.acceptanceArgv, clonePath, c.acceptanceTimeoutSec);
-      if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead } };
-      // Test passed — but did it "pass" by deleting the feature? Compare the ORIGINAL base
-      // to the full working tree so a committed deletion can't hide from the guard (round 4 #1).
-      const stat = git(clonePath, 'diff', '--shortstat', baseRef || 'HEAD', '--').trim();
-      if (suspiciousDeletion(c.goal, stat)) {
-        return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
-      }
-      return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' } };
-    },
+    // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1).
+    verify: (c, clonePath, opts) => verifyCard(c, clonePath, opts),
     classifyClaim, diagnoseFailure, generateCandidates, voteBest, writeNextPrompt,
     voiceProfile: voice.profile,
     exemplars: exemplarsFor(voice.bank, card.situation || 'kickoff'),

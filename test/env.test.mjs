@@ -19,6 +19,21 @@ test('extraAllow re-admits a named var', () => {
   assert.equal(env.FAL_KEY, 'x');
 });
 
+test('a Codex session gets OpenAI creds, NOT Anthropic ones (round 5 M9)', () => {
+  const src = { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'ant', CLAUDE_CODE_OAUTH_TOKEN: 'oauth', OPENAI_API_KEY: 'oai' };
+  const env = buildSessionEnv([], src, 'codex');
+  assert.equal(env.OPENAI_API_KEY, 'oai');
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);       // never leak Anthropic creds to Codex
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+});
+
+test('a Claude session gets Anthropic creds, NOT OpenAI ones (round 5 M9)', () => {
+  const src = { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'ant', OPENAI_API_KEY: 'oai' };
+  const env = buildSessionEnv([], src, 'claude');
+  assert.equal(env.ANTHROPIC_API_KEY, 'ant');
+  assert.equal(env.OPENAI_API_KEY, undefined);
+});
+
 test('allowedToolsFor includes the test runner and git, excludes push/gh', () => {
   const a = allowedToolsFor(['npm', 'test']);
   assert.match(a, /Bash\(npm test\)/);
