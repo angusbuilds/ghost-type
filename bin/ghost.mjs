@@ -37,6 +37,7 @@ import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
 import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
 
 const CONFIG = loadConfig();   // ~/.ghosttype/config.json merged over safe defaults
+const VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version; } catch { return '0.0.0'; } })();
 
 const HOME = os.homedir();
 const DEV_ROOT = path.join(HOME, 'dev');
@@ -172,7 +173,14 @@ async function main() {
       let tripReason = null;
       let caff = null, hb = null, armed = false;
       try {
-        arm({ sendoff: goal, project }); armed = true;
+        // arm() re-runs the safety checks; honor a BLOCKED result even though the pre-gate
+        // passed — state can change (unplugged, disk filled) in the gap (round 5 M2).
+        const armResult = arm({ sendoff: goal, project }); armed = true;
+        if (!armResult.checks.ok && !options.force) {
+          tripReason = 'arm-time safety check failed';
+          console.log('\n⏹ arm-time checks failed — not running:\n  - ' + armResult.checks.warnings.join('\n  - '));
+        }
+        const runnable = (armResult.checks.ok || options.force);
         const st = readState(); st.queue = cards; writeState(st);
         fs.mkdirSync(REPORT_DIR, { recursive: true });
         // Preserve orphaned clones from a crashed prior night (unfinished, never branched back)
@@ -190,7 +198,7 @@ async function main() {
           if (interrupted) process.exit(130);
           interrupted = true; console.log('\n⏹ interrupt — finishing this card, then stopping (Ctrl-C again to force)…');
         });
-        for (const card of cards.filter(isCodingCard)) {
+        for (const card of (runnable ? cards.filter(isCodingCard) : [])) {
           if (interrupted) { tripReason = 'interrupted'; break; }
           const pre = gov.check(Date.now());
           if (!pre.ok) { tripReason = pre.trip; console.log(`\n⏹ stopping: ${pre.trip}`); break; }
@@ -317,7 +325,8 @@ async function main() {
         '  ghost off | status | queue | report | logs [N]'].join('\n');
       // Bare `ghost` is a help request (exit 0); an actual unknown command is a usage
       // error (exit 2) so scripts can tell a typo from success (round 4 #12).
-      if (cmd === undefined) { console.log(help); break; }
+      if (cmd === undefined || cmd === '--help' || cmd === '-h') { console.log(help); break; }
+      if (cmd === '--version' || cmd === '-v') { console.log(VERSION); break; }
       throw new UsageError(`unknown command "${cmd}"\n${help}`);
     }
   }
