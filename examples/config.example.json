@@ -11,7 +11,7 @@
     "pollMs": "integer 250-600000 — haunt-drive poll interval",
     "minStable": "integer >= 2 — consecutive stable polls before a pane counts as idle",
     "defaultEngine": "\"claude\" or \"codex\"",
-    "sandboxAcceptance": "boolean — wrap acceptance tests in a macOS network/credential jail (for UNTRUSTED repos; breaks tests that need the network)"
+    "sandbox": "boolean — macOS OS-sandbox for UNTRUSTED repos: confines the coding session's writes to the clone AND denies network in acceptance tests (breaks tests/work that need the network or write outside the clone)"
   },
   "maxTokensNight": 2000000,
   "maxCostUsd": 10,
@@ -23,5 +23,5 @@
   "pollMs": 5000,
   "minStable": 2,
   "defaultEngine": "claude",
-  "sandboxAcceptance": false
+  "sandbox": false
 }

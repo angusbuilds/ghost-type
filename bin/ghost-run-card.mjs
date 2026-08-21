@@ -53,7 +53,7 @@ const deps = {
   }),
   // Shared verifier — includes the deletion guard, so this packaged runner can't ship a
   // destructive diff on a passing test (round 5 H1); sandbox the acceptance test when configured.
-  verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: loadConfig().sandboxAcceptance }),
+  verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: loadConfig().sandbox }),
   classifyClaim,
   diagnoseFailure,
   generateCandidates,

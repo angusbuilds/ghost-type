@@ -22,21 +22,32 @@ partial by design.
 | Recursive delete escaping the state dir | The reaper and cloner refuse a symlinked work root **or any symlinked ancestor within HOME**, and every clone path is realpath-overlap-checked. | `clone.mjs`, `daemon.mjs` |
 | Typing over you / into a shell (haunt mode) | Injection is fail-closed: only into a **confirmed** agent pane, never while you're at the keyboard, never a blind Enter; text is re-guarded after the pause and cleared from a shell if the agent exited mid-inject. | `drive.mjs` |
 
-## The one partial guard, stated plainly
+## The `sandbox` flag — for untrusted repositories
 
-**Acceptance tests execute code the agent may have modified.** That is unavoidable — verifying
-by running the test *is the point*. Ghost Type contains this rather than eliminating it:
+Both the coding session and the acceptance test execute code the agent may have influenced. On
+your **own** repositories that's benign; against **untrusted** ones it's a risk. Two things
+contain it regardless: the coding agent has **no arbitrary shell** (its Bash grant is only the
+detected test runner + non-pushing git), and all work happens in the **isolated clone**. Set
+`"sandbox": true` in `~/.ghosttype/config.json` to add an OS-level jail (macOS `sandbox-exec`):
 
-- the test runs in the **isolated clone** (writes land there, not the source repo),
-- with a **credential-stripped environment** (no API keys of any provider),
-- in its **own process group** that the timeout tears down wholesale.
+- **coding session** — network stays up (the provider API needs it), but **writes are confined
+  to the clone** (+ the agent's own state dirs). It cannot edit `~/.zshrc`, `~/.ssh`, or system
+  files. *(verified: an external write returns `EPERM`, a clone write succeeds, network works.)*
+- **acceptance test** — **network is denied** (the exfiltration path) and writes to credential
+  stores are blocked. *(verified: a network connect fails under the jail, succeeds without it.)*
 
-What it does **not** yet do is run the test inside a full OS sandbox restricting filesystem
-reads and network. A malicious test could still read files outside the clone (e.g. `~/.ssh`)
-or make network calls. This is a deliberate scope decision: the intended threat model is *your
-own repositories running their own tests*, and a strict `sandbox-exec` fs/network jail reliably
-breaks legitimate test suites. If you run Ghost Type against **untrusted** repositories, run the
-daemon as a dedicated low-privilege user or inside a VM/container.
+It's **off by default** because a network-denied test jail and a write-confined coding session
+break work that legitimately needs the network or writes outside the clone. It's a no-op off
+macOS; there, or for stronger isolation, run the daemon as a dedicated low-privilege user or
+inside a VM/container.
+
+## Cost governance is Claude-specific
+
+The hard **dollar** cap is enforced for Claude (via `--max-budget-usd` + metered `total_cost_usd`).
+The installed Codex CLI exposes no native dollar-budget flag and reports no per-turn cost, so
+Codex cards are bounded by the **token cap**, the **07:00 deadline**, and the consecutive-error
+breaker — not by dollars. If you need a hard dollar ceiling on Codex spend, route it through a
+budget-enforcing proxy or keep Codex cards off dollar-critical nights.
 
 ## Reporting
 

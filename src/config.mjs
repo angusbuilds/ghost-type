@@ -18,7 +18,7 @@ export const DEFAULTS = {
   pollMs: 5000,                // haunt-drive poll interval
   minStable: 2,                // consecutive stable polls before a pane counts as idle
   defaultEngine: 'claude',
-  sandboxAcceptance: false,    // wrap acceptance tests in a macOS network/credential jail (for untrusted repos)
+  sandbox: false,              // macOS OS-sandbox: confine coding writes to the clone + deny network in acceptance (for untrusted repos)
 };
 
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -39,7 +39,7 @@ const VALIDATORS = {
   pollMs: v => int(v) && v >= 250 && v <= 600_000,
   minStable: v => int(v) && v >= 2,                      // a single stable pair is too weak a signal
   defaultEngine: v => v === 'claude' || v === 'codex',
-  sandboxAcceptance: v => typeof v === 'boolean',
+  sandbox: v => typeof v === 'boolean',
 };
 
 // Merge stored config over defaults, keeping only known keys and dropping values that fail

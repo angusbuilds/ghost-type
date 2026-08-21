@@ -1,7 +1,8 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sandboxWrap } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason } from '../src/verifier.mjs';
+import { sandboxNetDeny, sandboxWriteConfine } from '../src/sandbox.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -105,15 +106,25 @@ test('verifyCard refuses a destructive diff even when the test passes (round 5 H
   fs.rmSync(d, { recursive: true, force: true });
 });
 
-test('sandboxWrap wraps in sandbox-exec on macOS, no-ops elsewhere (round 8 opt-in sandbox)', () => {
-  const wrapped = sandboxWrap(['npm', 'test'], { home: '/Users/x', platform: 'darwin' });
+test('sandboxNetDeny wraps acceptance in a network-denied jail on macOS, no-ops elsewhere (round 8)', () => {
+  const wrapped = sandboxNetDeny(['npm', 'test'], { home: '/Users/x', platform: 'darwin' });
   assert.equal(wrapped[0], 'sandbox-exec');
   assert.equal(wrapped[1], '-p');
   assert.match(wrapped[2], /\(deny network\*\)/);
   assert.match(wrapped[2], /\/Users\/x\/\.ssh/);
   assert.deepEqual(wrapped.slice(-2), ['npm', 'test']);   // original command preserved at the tail
-  // off macOS it's a no-op (sandbox-exec doesn't exist)
-  assert.deepEqual(sandboxWrap(['npm', 'test'], { platform: 'linux' }), ['npm', 'test']);
+  assert.deepEqual(sandboxNetDeny(['npm', 'test'], { platform: 'linux' }), ['npm', 'test']);   // no-op off macOS
+});
+
+test('sandboxWriteConfine confines writes to the clone but ALLOWS network (round 8 Critical)', () => {
+  const wrapped = sandboxWriteConfine(['claude', '-p', 'x'], '/work/clone-1', { home: '/Users/x', platform: 'darwin', tmpdir: '/tmp' });
+  assert.equal(wrapped[0], 'sandbox-exec');
+  assert.doesNotMatch(wrapped[2], /deny network/);        // the coding agent's API must still work
+  assert.match(wrapped[2], /\(deny file-write\*\)/);
+  assert.match(wrapped[2], /subpath "\/work\/clone-1"/);  // writes allowed under the clone
+  assert.deepEqual(wrapped.slice(-3), ['claude', '-p', 'x']);
+  assert.deepEqual(sandboxWriteConfine(['claude'], '/c', { platform: 'linux' }), ['claude']);   // no-op off macOS
+  assert.deepEqual(sandboxWriteConfine(['claude'], null, { platform: 'darwin' }), ['claude']);  // no clone → no-op
 });
 
 test('runAcceptance under the sandbox still passes a normal (non-network) test', { skip: process.platform !== 'darwin' }, async () => {

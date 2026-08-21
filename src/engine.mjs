@@ -4,6 +4,7 @@
 // token usage, and total cost. We hand-parse to keep zero deps.
 import { spawn } from 'node:child_process';
 import { CLAUDE_BIN, CODEX_BIN } from './lib.mjs';
+import { sandboxWriteConfine } from './sandbox.mjs';
 
 // Guardrails shared by both engine adapters (round 5 H4):
 //  - cap each captured stream so a runaway agent can't exhaust memory;
@@ -56,7 +57,7 @@ export function parseStreamJson(text) {
 // Turn/iteration limits are our job (spine loop + Governor). `--max-budget-usd` is the
 // one native in-process cap and is always passed. maxTurns is accepted but unused here,
 // kept in the signature so the card field has a home and a future CLI can use it.
-export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, env, bin, timeoutMs = DEFAULT_CALL_TIMEOUT_MS }) {
+export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, env, bin, timeoutMs = DEFAULT_CALL_TIMEOUT_MS, sandboxClone }) {
   const exe = bin || CLAUDE_BIN;
   const args = [
     '-p', prompt,
@@ -65,8 +66,11 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
     '--allowedTools', allowedTools,
     '--max-budget-usd', String(maxBudgetUsd),
   ];
+  // When sandboxing is on, confine the coding session's WRITES to the clone (network stays up
+  // for the API) — bare Edit/Write otherwise reach the whole host (round 8 Critical).
+  const [cmd, ...cmdArgs] = sandboxClone ? sandboxWriteConfine([exe, ...args], sandboxClone) : [exe, ...args];
   return new Promise((resolve) => {
-    const child = spawn(exe, args, { cwd, env: env || process.env, detached: true });
+    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true });
     const out = capped(), err = capped();
     let settled = false;
     const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
@@ -130,13 +134,14 @@ export function parseCodexStream(text) {
 
 // Drive Codex headless in the isolated clone. Returns the SAME shape as runEngine so the
 // spine/watcher work unchanged: a synthesized result.subtype of success|error.
-export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env, bin, timeoutMs = DEFAULT_CALL_TIMEOUT_MS }) {
+export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env, bin, timeoutMs = DEFAULT_CALL_TIMEOUT_MS, sandboxClone }) {
   const exe = bin || CODEX_BIN;
   const args = ['exec', '--json', '-C', cwd, '--sandbox', sandbox, '--skip-git-repo-check', '-c', 'approval_policy="never"'];
   if (model) args.push('-m', model);
   args.push(prompt);
+  const [cmd, ...cmdArgs] = sandboxClone ? sandboxWriteConfine([exe, ...args], sandboxClone) : [exe, ...args];
   return new Promise((resolve) => {
-    const child = spawn(exe, args, { cwd, env: env || process.env, detached: true });
+    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true });
     const out = capped(), err = capped();
     let settled = false;
     const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };

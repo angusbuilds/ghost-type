@@ -85,6 +85,7 @@ function realEngine(card) {
     // A per-call governor bound (remaining nightly $) overrides the card's native budget (round 6 #8).
     maxBudgetUsd: maxBudgetUsd ?? (writer ? 1 : card.maxBudgetUsd),
     timeoutMs,                                         // per-call deadline bound; undefined → engine default
+    sandboxClone: CONFIG.sandbox ? cwd : undefined,   // OS write-confinement for the coding session (round 8 Critical)
     env,
   });
 }
@@ -105,7 +106,7 @@ function cardDeps(card, voice) {
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
     // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1);
     // acceptance runs in the OS sandbox when configured (round 8: opt-in for untrusted repos).
-    verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: CONFIG.sandboxAcceptance }),
+    verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: CONFIG.sandbox }),
     classifyClaim, diagnoseFailure, generateCandidates, voteBest, writeNextPrompt,
     voiceProfile: voice.profile,
     exemplars: exemplarsFor(voice.bank, card.situation || 'kickoff'),

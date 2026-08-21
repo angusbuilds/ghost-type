@@ -1,24 +1,9 @@
 // src/verifier.mjs
 import { spawn, execFileSync } from 'node:child_process';
-import os from 'node:os';
 import { byteCap } from './lib.mjs';
 import { fence, scrubSecrets } from './sanitize.mjs';
 import { buildSessionEnv } from './env.mjs';
-
-// OPT-IN macOS sandbox for running an untrusted acceptance test: deny network (the exfiltration
-// path) and deny writes to the obvious credential stores. This is off by default because a
-// network-denied jail breaks test suites that legitimately reach the network — it's for users
-// pointing Ghost Type at UNTRUSTED repos (round 6/7/8 acceptance-sandbox item). No-op off macOS.
-export function sandboxWrap(argv, { home = os.homedir(), platform = process.platform } = {}) {
-  if (platform !== 'darwin') return argv;   // sandbox-exec is macOS-only
-  const profile = [
-    '(version 1)',
-    '(allow default)',
-    '(deny network*)',
-    `(deny file-write* (subpath "${home}/.ssh") (subpath "${home}/.aws") (subpath "${home}/.gnupg") (subpath "${home}/.config"))`,
-  ].join(' ');
-  return ['sandbox-exec', '-p', profile, ...argv];
-}
+import { sandboxNetDeny } from './sandbox.mjs';
 
 // Run the card's acceptance command OURSELVES as an argv spawn (never a shell).
 // Pass = exit 0 within timeout. The agent's own "done" claim is never trusted. The command is
@@ -28,7 +13,7 @@ export function sandboxWrap(argv, { home = os.homedir(), platform = process.plat
 // `sandbox: true` it is additionally wrapped in an OS network/credential jail (macOS).
 export function runAcceptance(argv, cwd, timeoutSec, env = buildSessionEnv([], process.env, 'none'), sandbox = false) {
   return new Promise((resolve) => {
-    const eff = sandbox ? sandboxWrap(argv) : argv;
+    const eff = sandbox ? sandboxNetDeny(argv) : argv;
     const child = spawn(eff[0], eff.slice(1), { cwd, env, detached: true });
     const CAP = 256 * 1024;
     let out = '', outBytes = 0, err = '', errBytes = 0;
