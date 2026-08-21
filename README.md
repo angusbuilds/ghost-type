@@ -6,19 +6,27 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-62%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-136%20passing-brightgreen">
   <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A526-blue">
   <img alt="deps" src="https://img.shields.io/badge/runtime%20deps-0-blueviolet">
+  <img alt="engines" src="https://img.shields.io/badge/engines-Claude%20%2B%20Codex-8b5cf6">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-black">
 </p>
 
 ---
 
 You plug the laptop in, say **"work on the gallery"** on your way out the door, and go
-to bed. Ghost Type keeps a coding agent moving on that project all night: every time the
-agent stops, Ghost Type writes the **next** prompt — phrased the way *you* would type it,
-learned from your own session history — and only stops a task when its test actually
-passes. In the morning you get branches to review, not an empty terminal.
+to bed. Ghost Type keeps a coding agent (Claude Code or Codex) moving on that project all
+night: every time the agent stops, Ghost Type writes the **next** prompt — phrased the way
+*you* would type it, learned from your own session history — and only stops a task when its
+test actually passes. In the morning you get branches to review, not an empty terminal.
+
+<p align="center">
+  <img src="assets/menu-bar-app.png" width="360" alt="GhostType menu-bar app — pick a session, it turns purple and drives it">
+</p>
+
+It ships as a native macOS **menu-bar app**: pick which terminal session it drives, and
+that pane turns purple while it works. Or drive everything headless from the `ghost` CLI.
 
 ## The gap it fills
 
@@ -63,7 +71,7 @@ Four things that could go wrong at 3am — and why they can't:
 
 | The fear | The guarantee |
 |---|---|
-| 🔥 It wrecks your repo | Works in an **isolated `git clone --local`** — your real checkout is never opened |
+| 🔥 It wrecks your repo | Works in an **isolated `git clone --no-hardlinks`** — even the object store is a separate copy |
 | 🚀 It pushes junk while you sleep | The clone's **`origin` remote is deleted** — push has nowhere to go |
 | 💸 It burns your fal / ElevenLabs credits | **Non-Claude API keys are stripped** from the session env by default |
 | ♾️ It runs forever / a $6k bill | Native **`--max-budget-usd`** + a token cap + a hard **07:00 stop** |
@@ -84,7 +92,7 @@ A hand-built explainer with cinematic clips (generated via Higgsfield) lives in
 ```bash
 git clone https://github.com/hangryclaude/ghost-type
 cd ghost-type
-node --test          # 44 tests, all offline — spends no tokens
+node --test          # 136 tests, all offline — spends no tokens
 ```
 
 Run one real card end-to-end against a scratch repo (this is the live smoke test):
@@ -121,9 +129,12 @@ Small, single-responsibility Node ESM modules — no framework, no dependencies,
 | `watcher.mjs` | Classify the stop: **done · stalled · rate-limited · offline** |
 | `verifier.mjs` | Run the acceptance test *ourselves*; catch "fixed it by deleting it" |
 | `prompt-writer.mjs` | Compose the next prompt in your voice (fenced, scrubbed, shield-gated) |
-| `governor.mjs` | Token / deadline / consecutive-error caps |
+| `governor.mjs` | Token / deadline / consecutive-error caps, metering every engine call |
 | `spine.mjs` | The loop that ties it together |
+| `voice.mjs` / `transcript.mjs` | Learn your prompting voice from your real `~/.claude` history |
+| `drive.mjs` / `haunt.mjs` / `sessions.mjs` | Haunt mode: pick a live pane, tint it, inject the next prompt |
 | `report.mjs` | Morning report: status strip first, detail collapsed |
+| `app/GhostType` | Native macOS menu-bar app (Swift/AppKit + SwiftUI) |
 
 Every untrusted input (diffs, test output, transcripts) is **secret-scrubbed, byte-capped,
 and fenced as data-not-instructions** before it reaches a prompt — because a transcript
@@ -136,26 +147,41 @@ So Ghost Type will *steer like you* — it won't be indistinguishable from you. 
 every prompt it writes lands in the morning report for you to grade 👍/👎, and the grade is
 on **judgment** (did it want the right thing?), not just style.
 
-## Status & roadmap
+## The `ghost` CLI
+
+```bash
+ghost scan                      # list your projects + which can run unattended
+ghost learn                     # distill your prompting voice from ~/.claude transcripts
+ghost on "<goal>" [--project P] [--engine claude|codex] [--dry-run]   # arm + run tonight
+ghost off | status | queue | report
+
+# haunt mode — drive a live terminal session
+ghost sessions                  # list your tmux panes (agents first)
+ghost haunt <pane> / unhaunt <pane>     # tint a pane purple / release it
+ghost drive <pane> "<goal>"     # watch it; type the next prompt when it goes idle
+```
+
+The native menu-bar app (`app/GhostType`) wraps this: `cd app/GhostType && swift build -c release`.
+
+## Status
 
 ```
-✅  Milestone 0 — the spine        clone → work → verify → commit → report
-✅  Milestone 1 — the smarter loop  claim≠fact · patch guard · diagnosis · ledger · vote
-✅  Milestone 2 — voice builder     `ghost learn` from your real transcripts
-✅  Milestone 3 — the daemon        arm checks · planner · dossiers · `ghost` CLI · launchd
-✅  Milestone 4 — report polish     theme-aware HTML · push notification · prompt lineage
+✅  the spine        clone → work → verify → commit → report
+✅  the smarter loop  claim≠fact · patch guard · diagnosis · ledger · pre-flight vote
+✅  voice builder     learns your real prompting voice (lowercase, no "!", keeps your typos)
+✅  the daemon        arm checks · planner · dossiers · caffeinate + heartbeat lifecycle
+✅  two engines       Claude Code AND Codex, each prompted the way it likes
+✅  haunt mode        select a terminal from the menu bar → it turns purple → it drives it
+✅  report            theme-aware HTML · morning push notification · prompt lineage
 
-93 tests, all offline (`node --test`) · feature-complete
+136 tests, all offline (`node --test`) · audited by Codex (gpt-5.6-sol, 15 findings fixed)
 ```
 
-Ghost Type is **feature-complete**. The loop never trusts a "done" claim (re-runs the
-test itself, flags a **false-done**) and fails fast on an empty patch; **`ghost learn`**
-distills your prompting voice from your own transcripts; **`ghost scan` / `ghost on`**
-plan and drive tonight's work with battery/disk arm-checks; and the morning **HTML
-report** pushes a notification so a good — or bad — night is never silent.
-
-Spine-first on purpose: M0 proves the whole thesis on one project in one night before any
-daemon, voice, or CLI code exists. Design spec and per-milestone plans live in
+Ghost Type never trusts a "done" claim — it re-runs the test itself and flags a
+**false-done** — and fails fast on an empty patch. Every unattended run is fenced by hard
+guardrails: isolated `--no-hardlinks` clones with no `origin`, non-Claude keys stripped, a
+budget + token + 07:00 cap, and injection that only ever sends one bounded line and never
+types while you're at the keyboard. Design spec and per-milestone plans live in
 [`docs/superpowers/`](docs/superpowers/).
 
 ## License

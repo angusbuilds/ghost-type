@@ -2,3 +2,8 @@ node_modules/
 .ghosttype/
 *.log
 .DS_Store
+
+# Swift build artifacts — the app is built from source with `swift build`
+app/GhostType/.build/
+app/GhostType.app/Contents/MacOS/
+*.dSYM/
