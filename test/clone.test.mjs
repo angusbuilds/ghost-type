@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeClone, validateClonePath } from '../src/clone.mjs';
+import { makeClone, validateClonePath, assertNoSymlinkAncestor } from '../src/clone.mjs';
 import { WORK_DIR } from '../src/lib.mjs';
 
 function tmpRepo() {
@@ -65,4 +65,16 @@ test('clone objects do NOT share inodes with the source (no-hardlinks isolation)
   }
   fs.rmSync(clone, { recursive: true, force: true });
   fs.rmSync(src, { recursive: true, force: true });
+});
+
+test('assertNoSymlinkAncestor refuses a symlinked ancestor within the guarded root (round 5 L1)', () => {
+  // realpath so stopAt matches (macOS /var → /private/var); the guard stops at this root and
+  // deliberately ignores OS-level symlinks above it.
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gt-anc-')));
+  const real = path.join(base, 'real'); fs.mkdirSync(real);
+  const link = path.join(base, 'link'); fs.symlinkSync(real, link);
+  const throughLink = path.join(link, 'a'); fs.mkdirSync(throughLink, { recursive: true });
+  assert.throws(() => assertNoSymlinkAncestor(throughLink, base), /symlinked path component/);
+  assert.doesNotThrow(() => assertNoSymlinkAncestor(path.join(real, 'x'), base));   // all-real path is fine
+  fs.rmSync(base, { recursive: true, force: true });
 });
