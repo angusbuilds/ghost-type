@@ -33,6 +33,11 @@ test('card ships: clone → scripted fix → real acceptance passes → branch f
     makeClone: (repoPath, id) => makeClone(repoPath, id),
     // the "engine" simulates the coding agent by creating the sentinel + branch in the clone
     runEngine: async ({ cwd }) => {
+      // A local clone does not inherit the source repo's user.name/email, so set an
+      // identity in the clone before committing — keeps the test hermetic (no reliance
+      // on the machine's global git config, which CI runners lack).
+      execFileSync('git', ['config', 'user.email', 't@t'], { cwd });
+      execFileSync('git', ['config', 'user.name', 't'], { cwd });
       execFileSync('git', ['checkout', '-b', card.branch], { cwd });
       fs.writeFileSync(path.join(cwd, 'FIXED'), '1');
       execFileSync('git', ['add', '-A'], { cwd });
