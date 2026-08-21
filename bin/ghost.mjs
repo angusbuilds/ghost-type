@@ -26,6 +26,11 @@ import { makeClone, fetchBranchBack } from '../src/clone.mjs';
 import { renderReport } from '../src/report.mjs';
 import { renderReportHtml } from '../src/report-html.mjs';
 import { notifyVerdict } from '../src/notify.mjs';
+import { Governor } from '../src/governor.mjs';
+import { recordLineage } from '../src/lineage.mjs';
+
+const NIGHTLY_TOKEN_CAP = 2_000_000;   // conservative default; hard-enforced from minute one
+function next7am() { const d = new Date(); d.setHours(7, 0, 0, 0); if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1); return d.getTime(); }
 
 const HOME = os.homedir();
 const DEV_ROOT = path.join(HOME, 'dev');
@@ -113,14 +118,25 @@ async function main() {
       if (dryRun) { console.log('\n(dry-run — planned only, nothing executed)\n'); break; }
 
       const voice = loadVoice();
+      const gov = new Governor({ maxTokensNight: NIGHTLY_TOKEN_CAP, nightDeadlineMs: next7am(), maxConsecErrors: 3 });
+      fs.mkdirSync(REPORT_DIR, { recursive: true });
       const results = [];
+      let tripReason = null;
       for (const card of cards.filter(isCodingCard)) {
+        const pre = gov.check(Date.now());
+        if (!pre.ok) { tripReason = pre.trip; console.log(`\n⏹ stopping: ${pre.trip}`); break; }
         console.log(`\n▶ ${card.project}: ${card.goal}`);
-        const r = await runCard(card, cardDeps(card, voice));
+        const deps = cardDeps(card, voice);
+        const lineageFile = path.join(REPORT_DIR, `lineage-${card.project}.jsonl`);
+        deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
+        const r = await runCard(card, deps);
         if (r.mergeReady) fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch);
         results.push(r);
+        gov.addUsage({ input_tokens: r.tokensUsed || 0, output_tokens: 0 });
+        const post = gov.check(Date.now());
+        if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
       }
-      const night = { date: dateStr(), cards: results, tokens: 0, costUsd: 0 };
+      const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
       fs.mkdirSync(REPORT_DIR, { recursive: true });
       const md = renderReport(night);
       fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);

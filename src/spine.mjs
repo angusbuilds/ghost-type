@@ -19,6 +19,7 @@ export async function runCard(card, deps) {
     diagnoseFailure = async () => '',
     generateCandidates = async () => [],
     voteBest = async ({ candidates }) => ({ choice: candidates[0], index: 0 }),
+    recordPrompt = () => {},                 // lineage sink (defaulted off for tests)
   } = deps;
 
   const clonePath = makeClone(card.repoPath, card.branch.replace(/[^\w.-]/g, '_'));
@@ -30,6 +31,7 @@ export async function runCard(card, deps) {
   let iterations = 0;
   let netBackoffs = 0;
   let falseDoneCount = 0;
+  let tokensUsed = 0;
 
   const writerEngine = async ({ prompt }) => runEngine({ cwd: clonePath, prompt, card, writer: true });
 
@@ -64,6 +66,7 @@ export async function runCard(card, deps) {
   while (iterations < card.maxIterations) {
     iterations += 1;
     const eng = await runEngine({ cwd: clonePath, prompt, card });
+    tokensUsed += (eng.usage?.input_tokens || 0) + (eng.usage?.output_tokens || 0);
     const outcome = classifyOutcome({ exitCode: eng.exitCode, result: eng.result, text: eng.text, nowMs: now() });
 
     if (outcome.state === 'rate-limited') {
@@ -73,7 +76,7 @@ export async function runCard(card, deps) {
     }
     if (outcome.state === 'network') {
       iterations -= 1;
-      if (++netBackoffs > 3) return park(card, 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger);
+      if (++netBackoffs > 3) return { ...park(card, 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
       await sleepUntil(now() + 30_000);
       continue;
     }
@@ -84,9 +87,9 @@ export async function runCard(card, deps) {
       const claim = classifyClaim({ claimText: eng.text, verifyPass: false });
       if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, no patch' }); }
       ledger.record({ iteration: iterations, prompt, outcome: 'no-patch', exitCode: null, stderrHead: lastTestOutput, howClose: 'agent produced no changes' });
-      if (iterations >= card.maxIterations) return park(card, 'no patch applied — working tree unchanged', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger);
-      try { prompt = await composeNext({ engText: eng.text, testOutput: lastTestOutput }); promptsWritten.push(prompt); }
-      catch (e) { if (e.message === 'SHIELD_HIT') return park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger); throw e; }
+      if (iterations >= card.maxIterations) return { ...park(card, 'no patch applied — working tree unchanged', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
+      try { prompt = await composeNext({ engText: eng.text, testOutput: lastTestOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'no-patch', project: card.project }); }
+      catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; throw e; }
       continue;
     }
 
@@ -98,16 +101,17 @@ export async function runCard(card, deps) {
 
     if (v.pass) {
       commit(clonePath, card.branch);
-      log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount });
-      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows };
+      recordPrompt({ iteration: iterations, prompt, outcome: 'shipped', project: card.project });
+      log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount, tokensUsed });
+      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed };
     }
 
     ledger.record({ iteration: iterations, prompt, outcome: 'fail', exitCode: 1, stderrHead: v.detail.testOutput, howClose: claim.claimedDone ? 'claimed done but tests failed' : 'tests failed' });
     if (iterations >= card.maxIterations) break;
-    try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); }
-    catch (e) { if (e.message === 'SHIELD_HIT') return park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger); throw e; }
+    try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'fail', project: card.project }); }
+    catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; throw e; }
   }
-  return park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger);
+  return { ...park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
 }
 
 function park(card, why, iterations, testOutput, promptsWritten, patterns, falseDoneCount = 0, ledger = { rows: [] }) {
@@ -117,12 +121,27 @@ function park(card, why, iterations, testOutput, promptsWritten, patterns, false
 
 export async function runNight(cards, deps) {
   const results = [];
-  for (const card of cards) results.push(await runCard(card, deps));
+  const gov = deps.governor;
+  let tripReason = null;
+  for (const card of cards) {
+    // Enforce the nightly caps BEFORE spending on the next card, and stop cleanly on a trip.
+    if (gov) {
+      const c = gov.check(deps.now());
+      if (!c.ok) { tripReason = c.trip; break; }
+    }
+    const r = await runCard(card, deps);
+    results.push(r);
+    if (gov) {
+      gov.addUsage({ input_tokens: r.tokensUsed || 0, output_tokens: 0 });
+      const c = gov.check(deps.now());
+      if (!c.ok) { tripReason = c.trip; break; }
+    }
+  }
   return {
     date: new Date(deps.now()).toISOString().slice(0, 10),
     cards: results,
-    tokens: deps.governor?.tokens ?? 0,
+    tokens: gov?.tokens ?? results.reduce((n, r) => n + (r.tokensUsed || 0), 0),
     costUsd: deps.costUsd ?? 0,
-    tripReason: deps.governor?.check(deps.now()).trip ?? null,
+    tripReason,
   };
 }
