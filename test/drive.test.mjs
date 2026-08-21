@@ -1,7 +1,41 @@
 // test/drive.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { captureTail, isPaneIdle, injectPrompt, driveStep, hauntDrive } from '../src/drive.mjs';
+import { captureTail, isPaneIdle, injectPrompt, driveStep, hauntDrive, sanitizeInjection } from '../src/drive.mjs';
+
+test('sanitizeInjection keeps a clean line, rejects control chars/newlines/empty', () => {
+  assert.equal(sanitizeInjection('fix the failing parser test'), 'fix the failing parser test');
+  assert.equal(sanitizeInjection('do this\nrm -rf /'), 'do this');       // only the first line survives
+  assert.equal(sanitizeInjection('tab\there\tnow'), 'tabherenow');       // control chars (tab) stripped
+  assert.equal(sanitizeInjection('   '), null);
+  assert.equal(sanitizeInjection('x'.repeat(700)), null);                 // over the ceiling
+});
+
+test('driveStep rejects unsafe generated text instead of typing it', async () => {
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : 'agent output here',
+    sendKeys: (id, k) => sent.push(k), humanIdleSecs: () => 999,
+    engine: async () => ({ text: '   ' }),   // empty → unsafe
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'rejected');
+  assert.deepEqual(sent, []);                                             // nothing typed
+});
+
+test('driveStep pauses if the human becomes active DURING generation (fresh recheck)', async () => {
+  let idleCall = 0;
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : 'agent output here',
+    sendKeys: (id, k) => sent.push(k),
+    humanIdleSecs: () => (++idleCall === 1 ? 999 : 3),   // away, then at the keyboard
+    engine: async () => ({ text: 'do the next thing' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'paused');
+  assert.deepEqual(sent, []);
+});
 
 test('captureTail keeps the last non-empty lines', () => {
   assert.equal(captureTail('a\n\nb\n\n\nc\n', 2), 'b\nc');
