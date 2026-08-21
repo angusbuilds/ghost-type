@@ -33,6 +33,13 @@ test('renderReportHtml escapes HTML in untrusted fields', () => {
   assert.match(html, /&lt;script&gt;/);
 });
 
+test('renderReportHtml labels a skipped card as skipped, not parked (round 5 M8)', () => {
+  const withSkip = { ...night, cards: [{ project: 'noRunner', goal: 'x', outcome: 'skipped', mergeReady: false, whyLine: 'proposal-only', iterations: 0, branch: 'ghost/z', testOutput: '', promptsWritten: [] }] };
+  const html = renderReportHtml(withSkip);
+  assert.match(html, /⊘ skipped/);
+  assert.match(html, /1 skipped/);      // counted in the verdict strip
+});
+
 test('verdictLine summarizes shipped/parked/review', () => {
   assert.equal(verdictLine(night), '1 shipped · 1 parked · review 1 branch');
 });

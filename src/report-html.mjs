@@ -2,19 +2,26 @@
 // A self-contained, theme-aware HTML morning report. Status strip first (columns, not
 // prose), then collapsible per-card detail with the real test output. No external assets.
 function esc(s) {
-  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // Escape `'` too — currently every call site is text or a double-quoted attribute, but
+  // that keeps the helper safe if a single-quoted attribute is ever added (round 5 review #9).
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 export function renderReportHtml(night) {
   const shipped = night.cards.filter(c => c.mergeReady).length;
   const parked = night.cards.filter(c => c.outcome === 'parked').length;
-  const rows = night.cards.map(c => `
+  const skipped = night.cards.filter(c => c.outcome === 'skipped').length;
+  // Render the ACTUAL outcome — a skipped proposal is not "parked" (round 5 M8).
+  const statusCell = (c) => c.mergeReady ? ['ok', '✅ ready']
+    : c.outcome === 'skipped' ? ['skip', '⊘ skipped']
+    : ['no', `— ${esc(c.outcome || 'parked')}`];
+  const rows = night.cards.map(c => { const [cls, label] = statusCell(c); return `
       <tr>
         <td>${esc(c.project)}</td>
-        <td class="${c.mergeReady ? 'ok' : 'no'}">${c.mergeReady ? '✅ ready' : '— parked'}</td>
+        <td class="${cls}">${label}</td>
         <td>${esc(c.whyLine)}</td>
         <td class="mono">${esc(c.iterations)}</td>
-      </tr>`).join('');
+      </tr>`; }).join('');
 
   const cards = night.cards.map(c => `
     <details${c.mergeReady ? ' open' : ''}>
@@ -51,7 +58,7 @@ export function renderReportHtml(night) {
   th,td { text-align:left; padding:11px 14px; border-bottom:1px solid var(--line); }
   th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
   tr:last-child td { border-bottom:none; }
-  td.ok { color:var(--ok); font-weight:600; } td.no { color:var(--no); font-weight:600; }
+  td.ok { color:var(--ok); font-weight:600; } td.no { color:var(--no); font-weight:600; } td.skip { color:var(--muted); font-weight:600; }
   .mono,code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   details { background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:14px; padding:6px 16px; }
   summary { cursor:pointer; padding:8px 0; font-size:17px; }
@@ -67,7 +74,7 @@ export function renderReportHtml(night) {
 <body><div class="wrap">
   <h1>👻 Ghost Type</h1>
   <p class="sub">${esc(night.date)}</p>
-  <div class="verdict">${shipped} shipped · ${parked} parked · ${esc(night.tokens)} tokens · $${Number(night.costUsd || 0).toFixed(2)}</div>
+  <div class="verdict">${shipped} shipped · ${parked} parked${skipped ? ` · ${skipped} skipped` : ''} · ${esc(night.tokens)} tokens · $${Number(night.costUsd || 0).toFixed(2)}</div>
   ${night.tripReason ? `<p class="sub">stopped early: ${esc(night.tripReason)}</p>` : ''}
   <table>
     <thead><tr><th>project</th><th>merge-ready</th><th>why</th><th>iters</th></tr></thead>

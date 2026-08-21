@@ -51,6 +51,9 @@ export function tagSituation(text) {
 // real history has 650KB pasted monsters. Cap every stored exemplar so the bank (and every
 // writer prompt that later concatenates it) stays bounded (round 4 #6).
 export const EXEMPLAR_CAP = 280;
+// The distilled voice profile is 9 short sections — cap it so a runaway distillation can't
+// bloat the file that rides into every prompt (round 5 review #7).
+export const PROFILE_CAP = 6000;
 
 // Group prompts by situation, keeping the most recent `perTag` of each (input assumed
 // oldest→newest). Returns { tag: [text, ...] }.
@@ -98,7 +101,9 @@ export async function learn({ projectsDir, engine, sampleN = 200, perTag = 5, ou
   fs.mkdirSync(outDir, { recursive: true });
   const profilePath = path.join(outDir, 'voice-profile.md');
   const exemplarPath = path.join(outDir, 'exemplars.json');
-  fs.writeFileSync(profilePath, profile + '\n');
+  // Cap the distilled profile before it's persisted — a runaway model response would otherwise
+  // be stored uncapped and re-injected into every future prompt (round 5 review #7).
+  fs.writeFileSync(profilePath, byteCap(profile, PROFILE_CAP) + '\n');
   fs.writeFileSync(exemplarPath, JSON.stringify(bank, null, 2));
 
   return { totalPrompts: all.length, sampled: sample.length, profilePath, exemplarPath, bank };
@@ -114,7 +119,8 @@ export function seedBank() {
 export function loadVoice(outDir = VOICE_DIR) {
   let profile = DEFAULT_VOICE_PROFILE;
   let bank = seedBank();
-  try { profile = fs.readFileSync(path.join(outDir, 'voice-profile.md'), 'utf8'); } catch { /* unlearned */ }
+  // Cap on read too, in case the file predates PROFILE_CAP (round 5 review #7).
+  try { profile = byteCap(fs.readFileSync(path.join(outDir, 'voice-profile.md'), 'utf8'), PROFILE_CAP); } catch { /* unlearned */ }
   try {
     const stored = JSON.parse(fs.readFileSync(path.join(outDir, 'exemplars.json'), 'utf8'));
     // Stored on top, seed as the floor so thin situations still have his voice. Cap each

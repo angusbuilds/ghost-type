@@ -30,7 +30,9 @@ const VALIDATORS = {
   maxCostUsd: v => num(v) && v > 0,
   nightDeadlineHour: v => int(v) && v >= 0 && v <= 23,   // 0 (midnight) is valid; 999 is not
   maxConsecErrors: v => int(v) && v >= 1,
-  humanIdleThreshold: v => num(v) && v >= 0,
+  // Must be a real positive floor — 0 would make a failed idle probe (which returns 0) look
+  // "idle" and let the ghost type while the human is active (round 5 M3).
+  humanIdleThreshold: v => num(v) && v >= 5,
   maxCards: v => int(v) && v >= 1,
   backpressureThreshold: v => int(v) && v >= 1,
   pollMs: v => int(v) && v >= 250 && v <= 600_000,

@@ -18,6 +18,19 @@ test('assembles a fenced prompt and returns the engine text', async () => {
   assert.match(captured, /make the failing parser test pass/);
 });
 
+test('a runaway voiceProfile/ledgerTable cannot blow up the assembled prompt (round 5 #7)', async () => {
+  let captured = '';
+  const engine = async ({ prompt }) => { captured = prompt; return { text: 'ok' }; };
+  await writeNextPrompt({
+    card, diffTail: '', testTail: '', notesTail: '', transcriptTail: '',
+    voiceProfile: 'x'.repeat(200000),               // runaway distilled profile
+    exemplars: [], ledgerTable: 'y'.repeat(200000), // runaway ledger
+    failure: null, engine,
+  });
+  // whole assembled prompt stays bounded (48KB cap + marker slack), not ~400KB
+  assert.ok(Buffer.byteLength(captured) < 60000, `assembled prompt bounded: ${Buffer.byteLength(captured)} bytes`);
+});
+
 test('shield hit on transcript throws a tagged error (caller parks the card)', async () => {
   const engine = async () => ({ text: 'nope' });
   await assert.rejects(() => writeNextPrompt({

@@ -13,13 +13,18 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
   if (scan.hit) { const e = new Error('SHIELD_HIT'); e.patterns = scan.patterns; throw e; }
 
   const clean = (t) => byteCap(scrubSecrets(String(t || '')), CAP);
+  // The model-generated fields (voiceProfile, exemplars, ledgerTable) must get the same
+  // bounding as everything else — the caller isn't guaranteed to have capped them, and an
+  // uncapped distilled profile or ledger would otherwise ride into every prompt (round 5 #7).
+  const profileCap = byteCap(String(voiceProfile || ''), 4000);
+  const exemplarCap = exemplars?.length ? byteCap(exemplars.join('\n- '), 4000) : '';
   const meta = [
     'You are writing the NEXT prompt to send to a coding agent, phrased exactly as this developer would type it.',
-    `VOICE PROFILE (imitate this style):\n${voiceProfile}`,
-    exemplars?.length ? `EXAMPLES OF HOW HE WRITES:\n- ${exemplars.join('\n- ')}` : '',
+    `VOICE PROFILE (imitate this style):\n${profileCap}`,
+    exemplarCap ? `EXAMPLES OF HOW HE WRITES:\n- ${exemplarCap}` : '',
     `THE GOAL: ${card.goal}`,
     failure ? `WHAT JUST FAILED: exit ${failure.code}\n${clean(failure.stderrHead)}` : '',
-    ledgerTable ? `WHAT YOU'VE ALREADY TRIED (do not repeat a dead end):\n${ledgerTable}` : '',
+    ledgerTable ? `WHAT YOU'VE ALREADY TRIED (do not repeat a dead end):\n${byteCap(String(ledgerTable), CAP)}` : '',
     rawTrace ? fence('raw-trace', clean(rawTrace)) : '',
     fence('diff', clean(diffTail)),
     fence('test-output', clean(testTail)),
@@ -28,7 +33,9 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
     'Output ONLY the next prompt text — no preamble, no quotes. Match his voice EXACTLY: all-lowercase, terse, no "!", no question, often no ending punctuation, keep his rough typos. One blunt instruction.',
   ].filter(Boolean).join('\n\n');
 
-  const r = await engine({ prompt: meta });
+  // Final backstop: cap the WHOLE assembled prompt so it can never exceed a safe argv/context
+  // size even if several fields are near their individual caps (round 5 M7).
+  const r = await engine({ prompt: byteCap(meta, 48000) });
   return r.text.trim();
 }
 
