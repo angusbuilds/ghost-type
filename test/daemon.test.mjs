@@ -32,3 +32,9 @@ test('reap removes everything not in keep', () => {
   assert.deepEqual(out, ['ghost_old1', 'ghost_old2']);
   assert.equal(removed.length, 2);
 });
+
+test('reap refuses to escape the work dir via .. or absolute names (M2)', () => {
+  const removed = [];
+  reap({ workDir: '/w', keep: [], list: () => ['../etc', '/etc/passwd', 'ghost_ok'], rm: (p) => removed.push(p) });
+  assert.deepEqual(removed, ['/w/ghost_ok']);   // only the contained child was removed
+});

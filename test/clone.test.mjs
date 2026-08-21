@@ -23,6 +23,10 @@ test('validateClonePath rejects paths outside WORK_DIR', () => {
   assert.doesNotThrow(() => validateClonePath(path.join(WORK_DIR, 'x')));
 });
 
+test('makeClone refuses a source that overlaps the work dir (H8)', () => {
+  assert.throws(() => makeClone(path.join(WORK_DIR, 'some-repo'), 'x'), /overlaps/);
+});
+
 test('makeClone produces an isolated clone with no origin remote', () => {
   const src = tmpRepo();
   const clone = makeClone(src, 'test-' + process.pid);

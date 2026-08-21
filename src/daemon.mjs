@@ -63,9 +63,14 @@ export function reconcile({ workDir = WORK_DIR, list = safeList, activeBranches 
 // Prune clones not in `keep`. Disk-checked by the caller before each clone; this cleans up.
 export function reap({ workDir = WORK_DIR, keep = [], list = safeList, rm = (p) => fs.rmSync(p, { recursive: true, force: true }) } = {}) {
   const removed = [];
+  const root = path.resolve(workDir) + path.sep;
   for (const name of list(workDir)) {
     if (keep.includes(name)) continue;
-    try { rm(path.join(workDir, name)); removed.push(name); } catch { /* skip locked */ }
+    const target = path.resolve(workDir, name);
+    // Containment: never rm anything that doesn't resolve to a direct child of workDir —
+    // a stray symlink or '..' entry must not let the reaper escape the work dir (Codex M2).
+    if (!target.startsWith(root) || path.dirname(target) !== path.resolve(workDir)) continue;
+    try { rm(target); removed.push(name); } catch { /* skip locked */ }
   }
   if (removed.length) log({ evt: 'reap', removed });
   return removed;

@@ -25,3 +25,13 @@ test('generic error → stalled', () => {
   const o = classifyOutcome({ exitCode: 0, result: { subtype: 'error', result: 'could not resolve the failure' }, text: 'could not resolve the failure', nowMs: NOW });
   assert.equal(o.state, 'stalled');
 });
+
+test('a SUCCESS that merely mentions a rate limit is still done (H4)', () => {
+  const o = classifyOutcome({ exitCode: 0, result: { subtype: 'success', result: 'fixed the rate limit handling, tests pass' }, text: 'fixed the rate limit handling', nowMs: NOW });
+  assert.equal(o.state, 'done');
+});
+
+test('a nonzero exit with no result and no network text is errored, not network (M4)', () => {
+  const o = classifyOutcome({ exitCode: 127, result: null, text: 'command not found: claude', nowMs: NOW });
+  assert.equal(o.state, 'errored');
+});

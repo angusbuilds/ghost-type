@@ -20,6 +20,7 @@ export async function runCard(card, deps) {
     generateCandidates = async () => [],
     voteBest = async ({ candidates }) => ({ choice: candidates[0], index: 0 }),
     recordPrompt = () => {},                 // lineage sink (defaulted off for tests)
+    governor = null,                         // if present, meters EVERY engine call (Codex H5)
   } = deps;
 
   const clonePath = makeClone(card.repoPath, card.branch.replace(/[^\w.-]/g, '_'));
@@ -30,10 +31,14 @@ export async function runCard(card, deps) {
   let lastTestOutput = '';
   let iterations = 0;
   let netBackoffs = 0;
+  let rateWaits = 0;
   let falseDoneCount = 0;
   let tokensUsed = 0;
 
-  const writerEngine = async ({ prompt }) => runEngine({ cwd: clonePath, prompt, card, writer: true });
+  // Every engine call — main, diagnosis, candidates, vote — goes through here so the
+  // governor sees all of them and the token counter is honest (Codex H5).
+  const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } return r; };
+  const writerEngine = async ({ prompt }) => meter(await runEngine({ cwd: clonePath, prompt, card, writer: true }));
 
   // Compose the next prompt: forced diagnosis from the raw trace, the full attempt
   // ledger, then pre-flight candidate generation + a judge vote. Falls back to a single
@@ -68,22 +73,26 @@ export async function runCard(card, deps) {
   }
 
   while (iterations < card.maxIterations) {
+    // Stop before spending if the governor has tripped (token/deadline/consecutive-error).
+    if (governor) { const c = governor.check(now()); if (!c.ok) return { ...park(card, `governor: ${c.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed }; }
     iterations += 1;
-    const eng = await runEngine({ cwd: clonePath, prompt, card });
-    tokensUsed += (eng.usage?.input_tokens || 0) + (eng.usage?.output_tokens || 0);
+    const eng = meter(await runEngine({ cwd: clonePath, prompt, card }));
     const outcome = classifyOutcome({ exitCode: eng.exitCode, result: eng.result, text: eng.text, nowMs: now() });
 
     if (outcome.state === 'rate-limited') {
       iterations -= 1;                       // not a real attempt — don't spend the budget
+      if (++rateWaits > 6) return { ...park(card, 'rate-limited too many times', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
       await sleepUntil(outcome.resetAtMs);
       continue;
     }
-    if (outcome.state === 'network') {
+    if (outcome.state === 'network' || outcome.state === 'errored') {
       iterations -= 1;
-      if (++netBackoffs > 3) return { ...park(card, 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
+      governor?.noteError();
+      if (++netBackoffs > 3) return { ...park(card, outcome.state === 'errored' ? 'engine errored repeatedly' : 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
       await sleepUntil(now() + 30_000);
       continue;
     }
+    netBackoffs = 0;   // a real attempt happened — reset the transient-failure counter
 
     // PATCH-APPLIED GUARD — before spending a test cycle, confirm the tree actually changed.
     if (!patchApplied(clonePath, baseRef)) {
@@ -104,12 +113,14 @@ export async function runCard(card, deps) {
     if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, tests failed' }); }
 
     if (v.pass) {
+      governor?.noteOk();
       commit(clonePath, card.branch);
       recordPrompt({ iteration: iterations, prompt, outcome: 'shipped', project: card.project });
       log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount, tokensUsed });
       return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed };
     }
 
+    governor?.noteError();
     ledger.record({ iteration: iterations, prompt, outcome: 'fail', exitCode: 1, stderrHead: v.detail.testOutput, howClose: claim.claimedDone ? 'claimed done but tests failed' : 'tests failed' });
     if (iterations >= card.maxIterations) break;
     try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'fail', project: card.project }); }
@@ -133,10 +144,11 @@ export async function runNight(cards, deps) {
       const c = gov.check(deps.now());
       if (!c.ok) { tripReason = c.trip; break; }
     }
-    const r = await runCard(card, deps);
+    // runCard meters every engine call into the governor itself (Codex H5) — don't
+    // double-count here; just re-check the caps between cards.
+    const r = await runCard(card, { ...deps, governor: gov });
     results.push(r);
     if (gov) {
-      gov.addUsage({ input_tokens: r.tokensUsed || 0, output_tokens: 0 });
       const c = gov.check(deps.now());
       if (!c.ok) { tripReason = c.trip; break; }
     }

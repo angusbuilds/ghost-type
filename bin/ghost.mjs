@@ -15,7 +15,7 @@ import { WORK_DIR, STATE_DIR, CLAUDE_BIN, ensureState } from '../src/lib.mjs';
 import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
-import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap } from '../src/daemon.mjs';
+import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
 import { runCard } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
@@ -43,16 +43,36 @@ const REPORT_DIR = path.join(HOME, 'dev', 'pages', 'ghost-type');
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name) => { const i = rest.indexOf(name); return i >= 0 ? (rest[i + 1] ?? true) : undefined; };
 const has = (name) => rest.includes(name);
+
+// Explicit option parsing (Codex H10): value-flags consume exactly one arg; everything
+// else that isn't a flag is a positional. Prevents a flag's value being read as the goal.
+function parseArgs(argv, valueFlags = [], boolFlags = []) {
+  const options = {}; const positionals = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (valueFlags.includes(a)) options[a.replace(/^--/, '')] = argv[++i];
+    else if (boolFlags.includes(a)) options[a.replace(/^--/, '')] = true;
+    else if (a.startsWith('--')) options[a.replace(/^--/, '')] = true;   // unknown bool flag
+    else positionals.push(a);
+  }
+  return { options, positionals };
+}
 const dateStr = () => new Date().toISOString().slice(0, 10);
 const git = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
 
 function realEngine(card) {
   const env = buildSessionEnv();
   const allowedTools = allowedToolsFor(card.acceptanceArgv || ['true']);
-  // Dispatch by the card's engine; Codex gets the literal ordered tail, Claude the loose directive.
-  return ({ cwd, prompt }) => runAgent({
-    engine: card.engine, cwd, prompt: shapeForEngine(prompt, card.engine, card),
-    allowedTools, maxTurns: card.maxTurns, maxBudgetUsd: card.maxBudgetUsd, env,
+  // Dispatch by the card's engine. Coding calls get the shaped prompt + full tools; WRITER
+  // calls (diagnosis/candidates/vote) get a read-only, tiny-budget model that can't touch
+  // the clone (Codex H6) and aren't shaped (they're meta-prompts, not for the coding agent).
+  return ({ cwd, prompt, writer }) => runAgent({
+    engine: card.engine, cwd,
+    prompt: writer ? prompt : shapeForEngine(prompt, card.engine, card),
+    allowedTools: writer ? 'Read' : allowedTools,
+    maxTurns: writer ? 1 : card.maxTurns,
+    maxBudgetUsd: writer ? 1 : card.maxBudgetUsd,
+    env,
   });
 }
 
@@ -105,56 +125,72 @@ async function main() {
       break;
     }
     case 'on': {
-      const goal = rest.find(a => !a.startsWith('--') && a !== flag('--project'));
-      const project = flag('--project');
-      const dryRun = has('--dry-run');
+      const { options, positionals } = parseArgs(rest, ['--project', '--engine'], ['--dry-run', '--force']);
+      const goal = positionals.join(' ').trim() || null;
+      const project = options.project;
+      const dryRun = Boolean(options['dry-run']);
+      const engine = options.engine === 'codex' ? 'codex' : 'claude';
+
       const checks = armChecks();
       if (!checks.ok) {
         console.log('⚠️  arm checks failed:\n  - ' + checks.warnings.join('\n  - '));
-        if (!dryRun && !has('--force')) process.exit(1);  // dry-run may still plan
+        if (!dryRun && !options.force) process.exit(1);
       }
 
-      const engine = flag('--engine') === 'codex' ? 'codex' : 'claude';
       let dossiers = scanDevRoot(DEV_ROOT);
       if (project) dossiers = dossiers.filter(d => d.name === project);
       const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), maxCards: project ? 1 : 2, engine });
+
+      console.log(`\n👻 planned queue (${cards.length}):`);
+      for (const c of cards) console.log(`  - [${isCodingCard(c) ? 'code' : 'proposal'}] ${c.project}: ${c.goal}`);
+      if (paused.length) console.log(`  paused (review backlog): ${paused.join(', ')}`);
+
+      // M3: dry-run touches NO persistent state — return before arming or writing the queue.
+      if (dryRun) { console.log('\n(dry-run — planned only, nothing armed or executed)\n'); break; }
+
       arm({ sendoff: goal, project });
       const st = readState(); st.queue = cards; writeState(st);
 
-      console.log(`\n👻 armed. queue (${cards.length}):`);
-      for (const c of cards) console.log(`  - [${isCodingCard(c) ? 'code' : 'proposal'}] ${c.project}: ${c.goal}`);
-      if (paused.length) console.log(`  paused (review backlog): ${paused.join(', ')}`);
-      if (dryRun) { console.log('\n(dry-run — planned only, nothing executed)\n'); break; }
-
+      // H9: a full lifecycle that ALWAYS reaches a terminal state — caffeinate + heartbeat
+      // held for the run, orphans reconciled, and the report/disarm/notify in `finally`.
       const voice = loadVoice();
       const gov = new Governor({ maxTokensNight: NIGHTLY_TOKEN_CAP, nightDeadlineMs: next7am(), maxConsecErrors: 3 });
       fs.mkdirSync(REPORT_DIR, { recursive: true });
+      reconcile({ activeBranches: cards.map(c => c.branch) });
+      reap({ keep: cards.map(c => c.branch.replace(/[^\w.-]/g, '_')) });
+      const caff = startCaffeinate();
+      writeHeartbeat();
+      const hb = setInterval(() => writeHeartbeat(), 120_000);
       const results = [];
       let tripReason = null;
-      for (const card of cards.filter(isCodingCard)) {
-        const pre = gov.check(Date.now());
-        if (!pre.ok) { tripReason = pre.trip; console.log(`\n⏹ stopping: ${pre.trip}`); break; }
-        console.log(`\n▶ ${card.project}: ${card.goal}`);
-        const deps = cardDeps(card, voice);
-        const lineageFile = path.join(REPORT_DIR, `lineage-${card.project}.jsonl`);
-        deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
-        const r = await runCard(card, deps);
-        if (r.mergeReady) fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch);
-        results.push(r);
-        gov.addUsage({ input_tokens: r.tokensUsed || 0, output_tokens: 0 });
-        const post = gov.check(Date.now());
-        if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
+      try {
+        for (const card of cards.filter(isCodingCard)) {
+          const pre = gov.check(Date.now());
+          if (!pre.ok) { tripReason = pre.trip; console.log(`\n⏹ stopping: ${pre.trip}`); break; }
+          console.log(`\n▶ ${card.project}: ${card.goal}`);
+          const deps = cardDeps(card, voice);
+          deps.governor = gov;                              // meters every engine call (H5)
+          const lineageFile = path.join(REPORT_DIR, `lineage-${card.project}.jsonl`);
+          deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
+          const r = await runCard(card, deps);
+          if (r.mergeReady) fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch);
+          results.push(r);
+          const post = gov.check(Date.now());
+          if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
+        }
+      } finally {
+        clearInterval(hb);
+        stopCaffeinate(caff);
+        const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
+        const md = renderReport(night);
+        fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
+        fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));
+        disarm();
+        notifyVerdict(night);
+        try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
+        console.log('\n' + md);
+        console.log(`\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
       }
-      const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
-      fs.mkdirSync(REPORT_DIR, { recursive: true });
-      const md = renderReport(night);
-      fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
-      fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));
-      disarm();
-      notifyVerdict(night);                                 // push, never silent
-      try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
-      console.log('\n' + md);
-      console.log(`\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
       break;
     }
     case 'sessions': {
@@ -170,15 +206,21 @@ async function main() {
     case 'unhaunt': { const id = rest[0]; if (!id) { console.log('usage: ghost unhaunt <pane-id>'); break; } unhaunt(id); console.log(`released ${id}`); break; }
     case 'haunts': { const list = readHaunted(); console.log(list.length ? 'haunting: ' + list.join(', ') : 'not haunting any panes'); break; }
     case 'drive': {
-      const paneId = rest[0];
-      const goal = rest.slice(1).filter(a => !a.startsWith('--')).join(' ');
+      const { options, positionals } = parseArgs(rest, ['--engine', '--max'], []);
+      const paneId = positionals[0];
+      const goal = positionals.slice(1).join(' ');
       if (!paneId || !goal) { console.log('usage: ghost drive <pane-id> "<goal>"'); break; }
-      const engine = flag('--engine') === 'codex' ? 'codex' : 'claude';
+      const engine = options.engine === 'codex' ? 'codex' : 'claude';
+      const maxInjects = Number(options.max) > 0 ? Number(options.max) : 20;
       haunt(paneId);   // tint it purple while we drive
+      // M5: always release the tint/state — on normal return, exception, or Ctrl-C.
+      const cleanup = () => { try { unhaunt(paneId); } catch { /* pane gone */ } };
+      process.once('SIGINT', () => { cleanup(); process.exit(130); });
       console.log(`🟣 driving ${paneId} toward: ${goal}  (ctrl-c to stop)`);
-      const out = await hauntDrive({ paneId, goal, deps: defaultDriveDeps({ engine }), maxInjects: Number(flag('--max') || 20) });
-      unhaunt(paneId);
-      console.log(`\ndone: ${out.reason} · ${out.injects} prompt(s) injected`);
+      try {
+        const out = await hauntDrive({ paneId, goal, deps: defaultDriveDeps({ engine }), maxInjects });
+        console.log(`\ndone: ${out.reason} · ${out.injects} prompt(s) injected`);
+      } finally { cleanup(); }
       break;
     }
     case 'off': { disarm(); console.log('👻 disarmed.'); break; }

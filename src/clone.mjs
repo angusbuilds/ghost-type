@@ -18,6 +18,11 @@ export function makeClone(repoPath, taskId) {
   ensureState();
   const clonePath = path.join(WORK_DIR, taskId);
   validateClonePath(clonePath);
+  // Reject a source that overlaps the work dir — a card whose repoPath is inside
+  // ~/.ghosttype/work could otherwise delete its own source when the dir is cleared (Codex H8).
+  const src = path.resolve(repoPath) + path.sep;
+  const work = path.resolve(WORK_DIR) + path.sep;
+  if (src.startsWith(work) || work.startsWith(src)) throw new Error(`clone source overlaps the work dir: ${repoPath}`);
   if (fs.existsSync(clonePath)) fs.rmSync(clonePath, { recursive: true, force: true });
   execFileSync('git', ['clone', '--local', '--no-hardlinks', '--quiet', path.resolve(repoPath), clonePath]);
   execFileSync('git', ['remote', 'remove', 'origin'], { cwd: clonePath });
