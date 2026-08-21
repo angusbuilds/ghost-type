@@ -45,7 +45,7 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
     child.on('close', (code) => {
       const parsed = parseStreamJson(out);
       resolve({
-        exitCode: code ?? 0,
+        exitCode: code == null ? 1 : code,   // signal (null) → nonzero so the watcher sees a failure
         result: parsed.result,
         usage: parsed.usage,
         text: parsed.assistantText || parsed.result?.result || err,
@@ -90,14 +90,14 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
     child.on('close', (code) => {
       const p = parseCodexStream(out);
       const text = p.assistantText || err;
-      const ok = code === 0 && Boolean(p.assistantText);
-      // A crash (nonzero exit, no agent message) yields NO result — so the watcher
-      // classifies it as a transport 'errored' with a retry cap, not a soft 'stalled'
-      // that loops (Codex re-audit #9).
-      const crashed = code !== 0 && !p.assistantText;
+      // ANY nonzero exit OR a signal (code === null) is a transport failure → no result, so
+      // the watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'.
+      // The text is still returned so rate/network detection can read it (Codex round 3 #6).
+      const exitCode = code == null ? 1 : code;
+      const crashed = exitCode !== 0;
       resolve({
-        exitCode: code ?? 0,
-        result: crashed ? null : { subtype: ok ? 'success' : 'error', result: text },
+        exitCode,
+        result: crashed ? null : { subtype: p.assistantText ? 'success' : 'error', result: text },
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
           output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,

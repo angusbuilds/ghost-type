@@ -63,15 +63,16 @@ export function reconcile({ workDir = WORK_DIR, list = safeList, activeBranches 
 // Prune clones not in `keep`. Disk-checked by the caller before each clone; this cleans up.
 export function reap({ workDir = WORK_DIR, keep = [], list = safeList, rm = (p) => fs.rmSync(p, { recursive: true, force: true }) } = {}) {
   const removed = [];
-  // Canonicalize the root so a SYMLINKED work dir can't let the reaper delete into the
-  // symlink's external target (Codex re-audit #8).
-  let rootReal; try { rootReal = fs.realpathSync(workDir); } catch { rootReal = path.resolve(workDir); }
-  const rootSep = rootReal + path.sep;
+  // A SYMLINKED work root is refused outright — canonicalizing it would just make the
+  // symlink's external target the "authorized" deletion root (Codex round 3).
+  try { if (fs.lstatSync(workDir).isSymbolicLink()) { log({ evt: 'reap-refused-symlink-root', workDir }); return removed; } } catch { /* absent → treated as empty below */ }
+  const root = path.resolve(workDir);
+  const rootSep = root + path.sep;
   for (const name of list(workDir)) {
     if (keep.includes(name)) continue;
-    const target = path.resolve(rootReal, name);
-    // Containment: only a direct child of the canonical work dir.
-    if (!target.startsWith(rootSep) || path.dirname(target) !== rootReal) continue;
+    const target = path.resolve(root, name);
+    // Containment: only a direct child of the work dir.
+    if (!target.startsWith(rootSep) || path.dirname(target) !== root) continue;
     try { rm(target); removed.push(name); } catch { /* skip locked */ }
   }
   if (removed.length) log({ evt: 'reap', removed });

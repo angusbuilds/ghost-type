@@ -38,6 +38,7 @@ export function writeJson(file, value) {
   const tmp = `${file}.tmp-${crypto.randomBytes(8).toString('hex')}`;
   const fd = fs.openSync(tmp, 'wx', mode);   // O_CREAT|O_EXCL|O_WRONLY — never follows a symlink
   try {
+    fs.fchmodSync(fd, mode);                 // the open() mode is umask-filtered; force it (re-audit #7)
     fs.writeFileSync(fd, JSON.stringify(value, null, 2));
     fs.fsyncSync(fd);
   } finally { fs.closeSync(fd); }

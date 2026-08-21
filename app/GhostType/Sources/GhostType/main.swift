@@ -10,6 +10,7 @@ enum Theme {
     static let hover = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
     // The one accent — spent only on a session that is actually being driven.
     static let violet = Color(red: 0.545, green: 0.361, blue: 0.965)
+    static let violetSoft = Color(red: 0.718, green: 0.580, blue: 0.965)
 
     static let hero = Font.system(size: 34, weight: .regular).monospacedDigit()
     static let value = Font.system(size: 12.5, weight: .medium, design: .monospaced)
@@ -58,10 +59,12 @@ struct Session: Identifiable, Decodable {
 final class GhostModel: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var haunted: Set<String> = []
+    @Published var daemonStatus: String = "off"
 
     private let node = "/opt/homebrew/bin/node"
     private let ghost = "\(NSHomeDirectory())/dev/ghost-type/bin/ghost.mjs"
     private var hauntedFile: String { "\(NSHomeDirectory())/.ghosttype/haunted.json" }
+    private var stateFile: String { "\(NSHomeDirectory())/.ghosttype/state.json" }
 
     @discardableResult private func run(_ args: [String]) -> String {
         let p = Process()
@@ -80,6 +83,9 @@ final class GhostModel: ObservableObject {
         sessions = (out.data(using: .utf8).flatMap { try? JSONDecoder().decode([Session].self, from: $0) }) ?? []
         if let d = try? Data(contentsOf: URL(fileURLWithPath: hauntedFile)),
            let arr = try? JSONDecoder().decode([String].self, from: d) { haunted = Set(arr) } else { haunted = [] }
+        if let d = try? Data(contentsOf: URL(fileURLWithPath: stateFile)),
+           let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let s = obj["status"] as? String { daemonStatus = s } else { daemonStatus = "off" }
     }
 
     func toggle(_ s: Session) {
@@ -111,11 +117,14 @@ struct GhostPanel: View {
                     }
                 }
                 Spacer()
-                Circle().fill(Theme.violet).frame(width: 8, height: 8)
-                    .opacity(breathe ? 1 : 0.45)
-                    .shadow(color: Theme.violet.opacity(0.7), radius: breathe ? 6 : 2)
-                    .padding(.top, 4)
-                    .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: breathe)
+                VStack(alignment: .trailing, spacing: 5) {
+                    Circle().fill(model.daemonStatus == "off" ? Theme.ink3 : Theme.violet).frame(width: 8, height: 8)
+                        .opacity(breathe ? 1 : 0.45)
+                        .shadow(color: (model.daemonStatus == "off" ? Color.clear : Theme.violet).opacity(0.7), radius: breathe ? 6 : 2)
+                        .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: breathe)
+                    Text(model.daemonStatus == "off" ? "idle" : model.daemonStatus)
+                        .font(Theme.caption).foregroundColor(model.daemonStatus == "off" ? Theme.ink3 : Theme.violetSoft)
+                }.padding(.top, 2)
             }
 
             rule

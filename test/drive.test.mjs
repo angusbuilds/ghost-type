@@ -14,7 +14,7 @@ test('sanitizeInjection keeps a clean line, rejects control chars/newlines/empty
 test('driveStep rejects unsafe generated text instead of typing it', async () => {
   const sent = [];
   const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
-    runner: (...a) => a[0] === 'list-panes' ? '%3' : 'agent output here',
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'claude' : 'agent output here',
     sendKeys: (id, k) => sent.push(k), humanIdleSecs: () => 999,
     engine: async () => ({ text: '   ' }),   // empty → unsafe
     voice: { profile: '', bank: {} }, sleep: async () => {},
@@ -43,7 +43,7 @@ test('driveStep pauses if the human becomes active DURING generation (fresh rech
   let idleCall = 0;
   const sent = [];
   const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
-    runner: (...a) => a[0] === 'list-panes' ? '%3' : 'agent output here',
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'claude' : 'agent output here',
     sendKeys: (id, k) => sent.push(k),
     humanIdleSecs: () => (++idleCall === 1 ? 999 : 3),   // away, then at the keyboard
     engine: async () => ({ text: 'do the next thing' }),
@@ -71,7 +71,7 @@ test('injectPrompt is two-step: text THEN Enter, never a blind Enter', async () 
 
 function deps(over = {}) {
   return {
-    runner: (...a) => a[0] === 'list-panes' ? '%3\n%4' : 'agent output here',
+    runner: (...a) => a[0] === 'list-panes' ? '%3\n%4' : a[0] === 'display-message' ? 'claude' : 'agent output here',
     sendKeys: () => {},
     humanIdleSecs: () => 999,            // human away
     engine: async () => ({ text: 'do the next thing' }),
@@ -101,8 +101,31 @@ test('driveStep injects a voiced prompt when the pane goes idle', async () => {
 
 test('driveStep stays hands-off while the agent is still producing output', async () => {
   let n = 0;
-  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'old output', deps: deps({ runner: (...a) => a[0] === 'list-panes' ? '%3' : 'new output ' + (n++) }) });
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'old output', deps: deps({ runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'claude' : 'new output ' + (n++) }) });
   assert.equal(r.state, 'working');
+});
+
+test('driveStep fails CLOSED when the foreground probe returns nothing', async () => {
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'out', deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? '' : 'out',
+    sendKeys: (i, k) => sent.push(k), humanIdleSecs: () => 999, engine: async () => ({ text: 'go' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'shell');       // empty probe → not confirmably an agent → no inject
+  assert.deepEqual(sent, []);
+});
+
+test('hauntDrive stops (agent-exited) when a stable pane is a bare shell', async () => {
+  let sent = 0;
+  const d = deps({
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'zsh' : 'stable output',
+    engine: async () => ({ text: 'x' }), sendKeys: () => { sent++; },
+  });
+  const out = await hauntDrive({ paneId: '%3', goal: 'g', deps: d, pollMs: 0, minStable: 2 });
+  assert.equal(out.reason, 'agent-exited');   // terminal — doesn't spend forever
+  assert.equal(out.injects, 0);
+  assert.equal(sent, 0);
 });
 
 test('hauntDrive stops when the pane dies', async () => {

@@ -143,7 +143,8 @@ async function main() {
       const goal = positionals.join(' ').trim() || null;
       const project = options.project;
       const dryRun = Boolean(options['dry-run']);
-      const engine = options.engine === 'codex' ? 'codex' : 'claude';
+      if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
+      const engine = options.engine || 'claude';
 
       const checks = armChecks();
       if (!checks.ok) {
@@ -162,17 +163,16 @@ async function main() {
       // M3: dry-run touches NO persistent state — return before arming or writing the queue.
       if (dryRun) { console.log('\n(dry-run — planned only, nothing armed or executed)\n'); break; }
 
-      arm({ sendoff: goal, project });
-      const st = readState(); st.queue = cards; writeState(st);
-
-      // H9 + re-audit #6: EVERYTHING after arming lives in the try, and cleanup is
-      // ordered so nothing can skip disarm — even a setup or report-render failure.
+      // H9 + re-audit round 3: arming itself is INSIDE the try, so even a failure writing
+      // the queue can't leave the state armed without reaching disarm.
       const voice = loadVoice();
       const gov = new Governor({ maxTokensNight: CONFIG.maxTokensNight, nightDeadlineMs: nightDeadlineMs(CONFIG), maxConsecErrors: CONFIG.maxConsecErrors });
       const results = [];
       let tripReason = null;
-      let caff = null, hb = null;
+      let caff = null, hb = null, armed = false;
       try {
+        arm({ sendoff: goal, project }); armed = true;
+        const st = readState(); st.queue = cards; writeState(st);
         fs.mkdirSync(REPORT_DIR, { recursive: true });
         reconcile({ activeBranches: cards.map(c => c.branch) });
         reap({ keep: cards.map(c => c.branch.replace(/[^\w.-]/g, '_')) });
@@ -196,7 +196,7 @@ async function main() {
       } finally {
         if (hb) clearInterval(hb);
         stopCaffeinate(caff);
-        disarm();                                           // guaranteed FIRST — never skipped
+        if (armed) disarm();                                // guaranteed if we armed — never skipped
         try {
           const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
           const md = renderReport(night);
@@ -226,7 +226,8 @@ async function main() {
       const paneId = positionals[0];
       const goal = positionals.slice(1).join(' ');
       if (!paneId || !goal) { console.log('usage: ghost drive <pane-id> "<goal>"'); break; }
-      const engine = options.engine === 'codex' ? 'codex' : 'claude';
+      if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
+      const engine = options.engine || 'claude';
       let maxInjects = 20;
       if (options.max !== undefined) {
         const m = Number(options.max);
