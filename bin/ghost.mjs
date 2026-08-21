@@ -150,7 +150,9 @@ async function main() {
       // supply can't outrun review capacity. Empty {} before meant it NEVER paused (round 4 #7).
       const unmergedByProject = {};
       for (const d of dossiers) {
-        try { const out = git(d.repoPath, 'branch', '--list', 'ghost/*').trim(); unmergedByProject[d.name] = out ? out.split('\n').filter(Boolean).length : 0; }
+        // Count only branches NOT yet merged into the repo's HEAD — a ghost/* branch he's
+        // already reviewed and merged shouldn't keep consuming the backlog (round 5 M4).
+        try { const out = git(d.repoPath, 'branch', '--no-merged', '--list', 'ghost/*').trim(); unmergedByProject[d.name] = out ? out.split('\n').filter(Boolean).length : 0; }
         catch { /* not a git repo or no branches → 0 */ }
       }
       const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), unmergedByProject, maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });

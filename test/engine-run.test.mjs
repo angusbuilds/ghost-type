@@ -26,6 +26,19 @@ test('runEngine surfaces a nonzero exit (network scenario)', async () => {
   assert.equal(r.exitCode, 1);
 });
 
+test('runEngine kills a call that exceeds its timeout and reports it as errored (round 5 H4)', async () => {
+  const start = Date.now();
+  const r = await runEngine({
+    cwd: process.cwd(), prompt: 'x', allowedTools: 'Read', maxTurns: 5, maxBudgetUsd: 1,
+    env: { ...process.env, GHOST_FAKE_SCENARIO: 'hang' }, bin: path.resolve('test/fake-hang.mjs'),
+    timeoutMs: 400,
+  });
+  assert.equal(r.exitCode, 1);                 // killed → transport failure
+  assert.equal(r.result, null);
+  assert.match(r.text, /exceeded .*killed/);
+  assert.ok(Date.now() - start < 8000, 'returned promptly after the timeout, did not hang');
+});
+
 test('runEngine DROPS a result on a nonzero exit so it is not mis-read as stalled (round 4 #4)', async () => {
   const r = await runEngine({
     cwd: process.cwd(), prompt: 'x', allowedTools: 'Read', maxTurns: 5, maxBudgetUsd: 1,
@@ -34,4 +47,5 @@ test('runEngine DROPS a result on a nonzero exit so it is not mis-read as stalle
   assert.equal(r.exitCode, 1);
   assert.equal(r.result, null);          // a result was emitted, but the nonzero exit voids it → 'errored'
   assert.ok(r.usage, 'usage is still surfaced separately');
+  assert.equal(r.costUsd, 0.01);         // the real cost survives the nulled result (round 5 M6)
 });
