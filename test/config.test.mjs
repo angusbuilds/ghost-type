@@ -31,6 +31,27 @@ test('bad-typed / non-positive numeric values are rejected, keeping the default'
   assert.equal(cfg.minStable, 4);                  // valid override survives
 });
 
+test('per-field validation rejects values that would defeat safety limits (round 4 #8)', () => {
+  const cfg = loadConfig(tmpCfg({
+    nightDeadlineHour: 999,     // ~41 days out — must be rejected
+    minStable: 1,               // too weak an idle signal — must be rejected
+    maxCards: 2.5,              // fractional count — must be rejected
+    defaultEngine: 'bogus',     // not a real engine — must be rejected
+    pollMs: 10,                 // below the sane floor — must be rejected
+  }));
+  assert.equal(cfg.nightDeadlineHour, DEFAULTS.nightDeadlineHour);
+  assert.equal(cfg.minStable, DEFAULTS.minStable);
+  assert.equal(cfg.maxCards, DEFAULTS.maxCards);
+  assert.equal(cfg.defaultEngine, DEFAULTS.defaultEngine);
+  assert.equal(cfg.pollMs, DEFAULTS.pollMs);
+});
+
+test('midnight (hour 0) is a VALID deadline and a real engine name survives (round 4 #8)', () => {
+  const cfg = loadConfig(tmpCfg({ nightDeadlineHour: 0, defaultEngine: 'codex' }));
+  assert.equal(cfg.nightDeadlineHour, 0);   // 0 is valid, not falsy-rejected
+  assert.equal(cfg.defaultEngine, 'codex');
+});
+
 test('nightDeadlineMs returns the next occurrence of the configured hour', () => {
   const now = Date.parse('2026-08-21T22:00:00');   // 10pm local
   const ms = nightDeadlineMs({ nightDeadlineHour: 7 }, now);

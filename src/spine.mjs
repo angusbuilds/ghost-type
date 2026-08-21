@@ -113,7 +113,8 @@ export async function runCard(card, deps) {
     }
 
     // VERIFY — run the acceptance test ourselves; ground the agent's claim against it.
-    const v = await verify(card, clonePath, { gitDiff });
+    // baseRef lets verify see committed changes too, not just the uncommitted tree.
+    const v = await verify(card, clonePath, { gitDiff, baseRef });
     lastTestOutput = v.detail.testOutput;
     const claim = classifyClaim({ claimText: eng.text, verifyPass: v.pass });
     if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, tests failed' }); }

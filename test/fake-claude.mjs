@@ -21,4 +21,10 @@ if (scenario === 'success') {
 } else if (scenario === 'network') {
   process.stderr.write('fetch failed: ENOTFOUND api.anthropic.com\n');
   process.exit(1);
+} else if (scenario === 'crash-after-result') {
+  // A structured result IS emitted, but the process then exits nonzero — the exact case
+  // where a retained result would be mis-classified as a soft 'stalled' (round 4 #4).
+  line({ type: 'assistant', message: { content: [{ type: 'text', text: 'partial work' }] } });
+  line({ type: 'result', subtype: 'success', result: 'looked done', usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.01 });
+  process.exit(1);
 }

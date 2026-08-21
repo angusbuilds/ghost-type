@@ -16,6 +16,9 @@ export function validateClonePath(p) {
 // .git/config + hooks. First act: remove origin so push/gh/deploy have nowhere to go.
 export function makeClone(repoPath, taskId) {
   ensureState();
+  // Refuse a SYMLINKED work root — else the recursive delete below could follow it into an
+  // external target (same hazard the reaper guards against) (round 4 #2).
+  try { if (fs.lstatSync(WORK_DIR).isSymbolicLink()) throw new Error('work dir is a symlink — refusing'); } catch (e) { if (/symlink/.test(e.message)) throw e; }
   const clonePath = path.join(WORK_DIR, taskId);
   validateClonePath(clonePath);
   // Reject a source that overlaps the work dir — canonicalized so a symlink alias to the

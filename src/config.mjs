@@ -20,19 +20,34 @@ export const DEFAULTS = {
   defaultEngine: 'claude',
 };
 
-const NUMERIC = ['maxTokensNight', 'maxCostUsd', 'nightDeadlineHour', 'maxConsecErrors', 'humanIdleThreshold', 'maxCards', 'backpressureThreshold', 'pollMs', 'minStable'];
+const num = (v) => typeof v === 'number' && Number.isFinite(v);
+const int = (v) => num(v) && Number.isInteger(v);
+// Per-field validators — a positive-finite check alone let `nightDeadlineHour: 999` (≈41
+// days out), fractional counts, `minStable: 1`, and a bogus engine name through, each of
+// which quietly defeats a safety limit (round 4 #8). A rejected value keeps the default.
+const VALIDATORS = {
+  maxTokensNight: v => num(v) && v > 0,
+  maxCostUsd: v => num(v) && v > 0,
+  nightDeadlineHour: v => int(v) && v >= 0 && v <= 23,   // 0 (midnight) is valid; 999 is not
+  maxConsecErrors: v => int(v) && v >= 1,
+  humanIdleThreshold: v => num(v) && v >= 0,
+  maxCards: v => int(v) && v >= 1,
+  backpressureThreshold: v => int(v) && v >= 1,
+  pollMs: v => int(v) && v >= 250 && v <= 600_000,
+  minStable: v => int(v) && v >= 2,                      // a single stable pair is too weak a signal
+  defaultEngine: v => v === 'claude' || v === 'codex',
+};
 
-// Merge stored config over defaults, keeping only known keys and dropping bad-typed values
-// so a hand-edited file can't inject nonsense into the run.
+// Merge stored config over defaults, keeping only known keys and dropping values that fail
+// their field validator so a hand-edited file can't inject nonsense (or unsafe limits).
 export function loadConfig(file = CONFIG_FILE) {
   const stored = readJson(file, {});
   const cfg = { ...DEFAULTS };
   if (stored && typeof stored === 'object') {
     for (const k of Object.keys(DEFAULTS)) {
       if (!(k in stored)) continue;
-      const v = stored[k];
-      if (NUMERIC.includes(k)) { if (typeof v === 'number' && Number.isFinite(v) && v > 0) cfg[k] = v; }
-      else if (typeof v === typeof DEFAULTS[k]) cfg[k] = v;
+      const ok = VALIDATORS[k] ? VALIDATORS[k](stored[k]) : typeof stored[k] === typeof DEFAULTS[k];
+      if (ok) cfg[k] = stored[k];
     }
   }
   return cfg;

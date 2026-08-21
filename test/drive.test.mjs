@@ -105,14 +105,50 @@ test('driveStep stays hands-off while the agent is still producing output', asyn
   assert.equal(r.state, 'working');
 });
 
-test('driveStep fails CLOSED when the foreground probe returns nothing', async () => {
+test('driveStep fails CLOSED on an unknown foreground probe: never types, keeps polling', async () => {
+  // An empty probe means the tmux read itself failed (transient) — NOT that the agent exited.
+  // Fail-closed on typing (send nothing) but keep polling rather than terminating the drive on
+  // a blip; a genuinely dead pane is caught by paneAlive separately (round 4 #3/#5).
   const sent = [];
   const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'out', deps: {
     runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? '' : 'out',
     sendKeys: (i, k) => sent.push(k), humanIdleSecs: () => 999, engine: async () => ({ text: 'go' }),
     voice: { profile: '', bank: {} }, sleep: async () => {},
   }});
-  assert.equal(r.state, 'shell');       // empty probe → not confirmably an agent → no inject
+  assert.equal(r.state, 'working');     // unknown foreground → not confirmably an agent → no inject, keep polling
+  assert.deepEqual(sent, []);
+});
+
+test('foregroundIsAgent: a generic runtime is an agent ONLY if its argv names one (round 4 #3)', async () => {
+  const { foregroundIsAgent } = await import('../src/drive.mjs');
+  const runner = (cmd) => (...a) => a[0] === 'display-message' && a.includes('#{pane_current_command}') ? cmd
+    : a[0] === 'display-message' ? '/dev/ttys001' : '';
+  // bare `node` running a build → NOT an agent (argv has no agent)
+  assert.equal(foregroundIsAgent('%1', { runner: runner('node'), ps: () => 'node /repo/build.js' }), false);
+  // `node` actually running claude → IS an agent
+  assert.equal(foregroundIsAgent('%1', { runner: runner('node'), ps: () => 'node /Users/x/.local/bin/claude' }), true);
+  // direct claude needs no argv probe
+  assert.equal(foregroundIsAgent('%1', { runner: runner('claude'), ps: () => '' }), true);
+  // a plain shell is never an agent
+  assert.equal(foregroundIsAgent('%1', { runner: runner('zsh'), ps: () => '-zsh' }), false);
+});
+
+test('injectPrompt skips Enter when beforeEnter fails after the pause (round 4 #3)', async () => {
+  const calls = [];
+  const sent = await injectPrompt('%3', 'keep going', { sendKeys: (id, k) => calls.push(k), sleep: async () => {}, beforeEnter: () => false });
+  assert.equal(sent, false);
+  assert.deepEqual(calls, ['keep going']);   // text was typed, but Enter was NOT sent into a changed world
+});
+
+test('driveStep keeps polling (does not terminate) while a subprocess/tool runs (round 4 #5)', async () => {
+  // foreground is `git` (a tool the agent spawned) — neither shell nor agent → 'working', never 'shell'.
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'out', deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'git' : 'out',
+    sendKeys: (i, k) => sent.push(k), humanIdleSecs: () => 999, engine: async () => ({ text: 'go' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'working');
   assert.deepEqual(sent, []);
 });
 

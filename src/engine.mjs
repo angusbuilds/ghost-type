@@ -44,9 +44,12 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
     child.stderr.on('data', d => { err += d; });
     child.on('close', (code) => {
       const parsed = parseStreamJson(out);
+      const exitCode = code == null ? 1 : code;   // signal (null) → nonzero so the watcher sees a failure
       resolve({
-        exitCode: code == null ? 1 : code,   // signal (null) → nonzero so the watcher sees a failure
-        result: parsed.result,
+        exitCode,
+        // A nonzero/signal exit is a transport failure — drop the result so the watcher
+        // classifies it 'errored' (retry-capped), not a soft 'stalled' (round 4 #4).
+        result: exitCode === 0 ? parsed.result : null,
         usage: parsed.usage,
         text: parsed.assistantText || parsed.result?.result || err,
         raw: out,

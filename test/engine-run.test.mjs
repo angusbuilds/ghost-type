@@ -25,3 +25,13 @@ test('runEngine surfaces a nonzero exit (network scenario)', async () => {
   });
   assert.equal(r.exitCode, 1);
 });
+
+test('runEngine DROPS a result on a nonzero exit so it is not mis-read as stalled (round 4 #4)', async () => {
+  const r = await runEngine({
+    cwd: process.cwd(), prompt: 'x', allowedTools: 'Read', maxTurns: 5, maxBudgetUsd: 1,
+    env: { ...process.env, GHOST_FAKE_SCENARIO: 'crash-after-result' }, bin: FAKE,
+  });
+  assert.equal(r.exitCode, 1);
+  assert.equal(r.result, null);          // a result was emitted, but the nonzero exit voids it → 'errored'
+  assert.ok(r.usage, 'usage is still surfaced separately');
+});

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { tagSituation, buildExemplarBank, exemplarsFor, learn, loadVoice, SITUATIONS } from '../src/voice.mjs';
+import { tagSituation, buildExemplarBank, exemplarsFor, learn, loadVoice, SITUATIONS, EXEMPLAR_CAP } from '../src/voice.mjs';
 
 test('tagSituation routes prompts to the right situation', () => {
   assert.equal(tagSituation('build the new parser'), 'kickoff');
@@ -24,6 +24,14 @@ test('buildExemplarBank groups by tag and caps per tag', () => {
   assert.ok(bank.kickoff.length <= 2);
   assert.ok(Array.isArray(bank['wrap-up']));
   assert.deepEqual(Object.keys(bank).sort(), [...SITUATIONS].sort());
+});
+
+test('buildExemplarBank caps a monster pasted prompt so the bank stays bounded (round 4 #6)', () => {
+  const huge = 'build ' + 'x'.repeat(650_000);   // a 650KB pasted prompt, like his real history
+  const bank = buildExemplarBank([{ text: huge }], 5);
+  const stored = bank.kickoff[0];
+  assert.ok(Buffer.byteLength(stored) <= EXEMPLAR_CAP + 40, `exemplar bounded: ${Buffer.byteLength(stored)} bytes`);
+  assert.match(stored, /\[truncated/);
 });
 
 test('exemplarsFor falls back across tags when a situation is thin', () => {

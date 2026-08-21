@@ -16,25 +16,40 @@ export function readState() { return readJson(STATE_FILE, { status: 'off', sendo
 export function writeState(s) { writeJson(STATE_FILE, s); }
 
 // --- real probes (overridable in tests) ---
+// Both return `null` on an unreadable probe — an UNKNOWN safety state, which armChecks
+// refuses. A failed probe used to read as "safe" (not-on-battery / infinite disk), letting
+// the ghost run unattended with no validated power or headroom (round 4 #9).
 export function realOnBattery() {
-  try { return /Battery Power/.test(execFileSync('pmset', ['-g', 'batt']).toString()); } catch { return false; }
+  try { return /Battery Power/.test(execFileSync('pmset', ['-g', 'batt']).toString()); } catch { return null; }
 }
 export function realFreeDiskGB(dir = WORK_DIR) {
   try {
     const base = fs.existsSync(dir) ? dir : path.dirname(dir);
     const out = execFileSync('df', ['-k', base]).toString().trim().split('\n').pop().split(/\s+/);
-    return Math.floor(Number(out[3]) / 1024 / 1024); // KB avail → GB
-  } catch { return Infinity; }
+    const gb = Math.floor(Number(out[3]) / 1024 / 1024); // KB avail → GB
+    return Number.isFinite(gb) ? gb : null;              // malformed df row → unknown
+  } catch { return null; }
 }
 function safeList(dir) { try { return fs.readdirSync(dir); } catch { return []; } }
 
-// Refuse to arm on battery or low disk — the two silent-death causes.
+// Refuse to arm on battery, low disk, OR an unknown probe result — the silent-death causes.
 export function armChecks({ onBattery = realOnBattery, freeDiskGB = realFreeDiskGB } = {}) {
   const warnings = [];
   let ok = true;
-  if (onBattery()) { warnings.push('on battery — plug into AC or the machine will sleep and the ghost never runs'); ok = false; }
+  const batt = onBattery();
+  if (batt !== false) {                                  // true OR null(unknown) → refuse
+    warnings.push(batt === null ? 'could not read power state — refusing to arm (fail-closed)'
+                                : 'on battery — plug into AC or the machine will sleep and the ghost never runs');
+    ok = false;
+  }
   const gb = freeDiskGB();
-  if (gb < 20) { warnings.push(`low disk: ${gb}GB free (< 20GB) — clones may fail`); ok = false; }
+  if (typeof gb !== 'number' || !Number.isFinite(gb)) {  // null/NaN/Infinity → refuse
+    warnings.push('could not read free disk — refusing to arm (fail-closed)');
+    ok = false;
+  } else if (gb < 20) {
+    warnings.push(`low disk: ${gb}GB free (< 20GB) — clones may fail`);
+    ok = false;
+  }
   return { ok, warnings, freeDiskGB: gb };
 }
 

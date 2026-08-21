@@ -38,12 +38,17 @@ export function writeJson(file, value) {
   const tmp = `${file}.tmp-${crypto.randomBytes(8).toString('hex')}`;
   const fd = fs.openSync(tmp, 'wx', mode);   // O_CREAT|O_EXCL|O_WRONLY — never follows a symlink
   try {
-    fs.fchmodSync(fd, mode);                 // the open() mode is umask-filtered; force it (re-audit #7)
-    fs.writeFileSync(fd, JSON.stringify(value, null, 2));
-    fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
-  try { fs.renameSync(tmp, file); }
-  catch (e) { try { fs.unlinkSync(tmp); } catch { /* best effort */ } throw e; }
+    try {
+      fs.fchmodSync(fd, mode);               // the open() mode is umask-filtered; force it (re-audit #7)
+      fs.writeFileSync(fd, JSON.stringify(value, null, 2));
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    // ANY failure after open — fchmod/write/fsync/close/rename — must not leak the temp (round 4 #13).
+    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+    throw e;
+  }
 }
 
 export function log(entry) {

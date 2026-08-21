@@ -98,11 +98,12 @@ function cardDeps(card, voice) {
       if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '-m', `ghost: ${String(card.goal).slice(0, 60)}`); }
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
-    verify: async (c, clonePath) => {
+    verify: async (c, clonePath, { baseRef } = {}) => {
       const r = await runAcceptance(c.acceptanceArgv, clonePath, c.acceptanceTimeoutSec);
       if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead } };
-      // Test passed — but did it "pass" by deleting the feature? (the overnight classic)
-      const stat = git(clonePath, 'diff', '--shortstat', 'HEAD').trim();
+      // Test passed — but did it "pass" by deleting the feature? Compare the ORIGINAL base
+      // to the full working tree so a committed deletion can't hide from the guard (round 4 #1).
+      const stat = git(clonePath, 'diff', '--shortstat', baseRef || 'HEAD', '--').trim();
       if (suspiciousDeletion(c.goal, stat)) {
         return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
       }
@@ -154,7 +155,14 @@ async function main() {
 
       let dossiers = scanDevRoot(DEV_ROOT);
       if (project) dossiers = dossiers.filter(d => d.name === project);
-      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });
+      // Backpressure: count this project's still-unmerged `ghost/*` branches so overnight
+      // supply can't outrun review capacity. Empty {} before meant it NEVER paused (round 4 #7).
+      const unmergedByProject = {};
+      for (const d of dossiers) {
+        try { const out = git(d.repoPath, 'branch', '--list', 'ghost/*').trim(); unmergedByProject[d.name] = out ? out.split('\n').filter(Boolean).length : 0; }
+        catch { /* not a git repo or no branches → 0 */ }
+      }
+      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), unmergedByProject, maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });
 
       console.log(`\n👻 planned queue (${cards.length}):`);
       for (const c of cards) console.log(`  - [${isCodingCard(c) ? 'code' : 'proposal'}] ${c.project}: ${c.goal}`);
@@ -201,16 +209,23 @@ async function main() {
           const post = gov.check(Date.now());
           if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
         }
+        // Proposal-only cards can't be graded unattended — surface them in the report as
+        // skipped-with-reason instead of silently dropping them (round 4 #7).
+        for (const c of cards.filter(c => !isCodingCard(c))) {
+          results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false, whyLine: c.reason || 'proposal-only — no test runner to verify against', branch: c.branch, iterations: 0, promptsWritten: [], testOutput: '' });
+        }
       } finally {
         if (hb) clearInterval(hb);
         stopCaffeinate(caff);
         if (armed) disarm();                                // guaranteed if we armed — never skipped
+        const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: results.reduce((n, r) => n + (r.costUsd || 0), 0), tripReason };
+        // Notify FIRST and on its OWN try — the failure notification is exactly the case
+        // where visibility matters most, so a render/disk error must not swallow it (round 4 #10).
+        try { notifyVerdict(night); } catch (e) { console.error('notify error:', e.message); }
         try {
-          const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: results.reduce((n, r) => n + (r.costUsd || 0), 0), tripReason };
           const md = renderReport(night);
           fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
           fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));
-          notifyVerdict(night);
           try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
           console.log('\n' + md + `\n\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
         } catch (e) { console.error('report error:', e.message); }
@@ -226,14 +241,14 @@ async function main() {
       console.log('\nPick one to haunt from the menu bar, or: ghost haunt <target>\n');
       break;
     }
-    case 'haunt': { const id = rest[0]; if (!id) { console.log('usage: ghost haunt <pane-id>'); break; } haunt(id); console.log(`🟣 haunting ${id}`); break; }
-    case 'unhaunt': { const id = rest[0]; if (!id) { console.log('usage: ghost unhaunt <pane-id>'); break; } unhaunt(id); console.log(`released ${id}`); break; }
+    case 'haunt': { const id = rest[0]; if (!id) throw new UsageError('ghost haunt <pane-id>'); haunt(id); console.log(`🟣 haunting ${id}`); break; }
+    case 'unhaunt': { const id = rest[0]; if (!id) throw new UsageError('ghost unhaunt <pane-id>'); unhaunt(id); console.log(`released ${id}`); break; }
     case 'haunts': { const list = readHaunted(); console.log(list.length ? 'haunting: ' + list.join(', ') : 'not haunting any panes'); break; }
     case 'drive': {
       const { options, positionals } = parseArgs(rest, ['--engine', '--max'], []);
       const paneId = positionals[0];
       const goal = positionals.slice(1).join(' ');
-      if (!paneId || !goal) { console.log('usage: ghost drive <pane-id> "<goal>"'); break; }
+      if (!paneId || !goal) throw new UsageError('ghost drive <pane-id> "<goal>"');
       if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
       const engine = options.engine || 'claude';
       let maxInjects = 20;
@@ -296,14 +311,19 @@ async function main() {
       console.log(fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : 'no report yet — run `ghost on` first.');
       break;
     }
-    default:
-      console.log('ghost — keep coding agents working while you are away\n');
-      console.log('  ghost scan [devRoot]                 list projects + test runners');
-      console.log('  ghost learn                          build your voice profile');
-      console.log('  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight');
-      console.log('  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"');
-      console.log('  ghost doctor                         check the environment is ready');
-      console.log('  ghost off | status | queue | report | logs [N]');
+    default: {
+      const help = ['ghost — keep coding agents working while you are away\n',
+        '  ghost scan [devRoot]                 list projects + test runners',
+        '  ghost learn                          build your voice profile',
+        '  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight',
+        '  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"',
+        '  ghost doctor                         check the environment is ready',
+        '  ghost off | status | queue | report | logs [N]'].join('\n');
+      // Bare `ghost` is a help request (exit 0); an actual unknown command is a usage
+      // error (exit 2) so scripts can tell a typo from success (round 4 #12).
+      if (cmd === undefined) { console.log(help); break; }
+      throw new UsageError(`unknown command "${cmd}"\n${help}`);
+    }
   }
 }
 

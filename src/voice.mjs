@@ -47,13 +47,18 @@ export function tagSituation(text) {
   return 'continue';
 }
 
+// A stored exemplar is a short imitation target — voice lives in the brief ones, and his
+// real history has 650KB pasted monsters. Cap every stored exemplar so the bank (and every
+// writer prompt that later concatenates it) stays bounded (round 4 #6).
+export const EXEMPLAR_CAP = 280;
+
 // Group prompts by situation, keeping the most recent `perTag` of each (input assumed
 // oldest→newest). Returns { tag: [text, ...] }.
 export function buildExemplarBank(prompts, perTag = 5) {
   const bank = Object.fromEntries(SITUATIONS.map(s => [s, []]));
   for (const p of prompts) {
     const tag = tagSituation(p.text);
-    bank[tag].push(p.text);
+    bank[tag].push(byteCap(String(p.text).replace(/\n+/g, ' ').trim(), EXEMPLAR_CAP));
   }
   for (const s of SITUATIONS) bank[s] = bank[s].slice(-perTag);
   return bank;
@@ -112,8 +117,9 @@ export function loadVoice(outDir = VOICE_DIR) {
   try { profile = fs.readFileSync(path.join(outDir, 'voice-profile.md'), 'utf8'); } catch { /* unlearned */ }
   try {
     const stored = JSON.parse(fs.readFileSync(path.join(outDir, 'exemplars.json'), 'utf8'));
-    // Stored on top, seed as the floor so thin situations still have his voice.
-    for (const s of SITUATIONS) bank[s] = [...(bank[s] || []), ...(stored[s] || [])].slice(-8);
+    // Stored on top, seed as the floor so thin situations still have his voice. Cap each
+    // stored exemplar in case the file predates EXEMPLAR_CAP (round 4 #6).
+    for (const s of SITUATIONS) bank[s] = [...(bank[s] || []), ...(stored[s] || []).map(t => byteCap(String(t), EXEMPLAR_CAP))].slice(-8);
   } catch { /* unlearned — keep seed */ }
   return { profile, bank };
 }

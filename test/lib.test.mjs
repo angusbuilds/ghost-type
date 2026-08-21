@@ -15,6 +15,16 @@ test('writeJson is atomic (leaves no .tmp behind) and round-trips', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('writeJson leaves NO temp behind when serialization fails mid-write (round 4 #13)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lib-'));
+  const f = path.join(dir, 'state.json');
+  const circular = {}; circular.self = circular;               // JSON.stringify throws on this
+  assert.throws(() => writeJson(f, circular));
+  assert.equal(fs.readdirSync(dir).filter(n => n.includes('.tmp')).length, 0, 'temp cleaned up on failure');
+  assert.equal(fs.existsSync(f), false, 'no partial destination file');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('readJson preserves a corrupt file instead of silently discarding it (M1)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lib-'));
   const f = path.join(dir, 'state.json');

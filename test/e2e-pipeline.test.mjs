@@ -38,10 +38,12 @@ function realDeps(repo, runEngine, extra = {}) {
       if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '-m', 'ghost'); }
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 4000) }),
-    verify: async (c, clonePath) => {
+    verify: async (c, clonePath, { baseRef } = {}) => {
       const r = await runAcceptance(c.acceptanceArgv, clonePath, c.acceptanceTimeoutSec);
       if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead || 'test failed' } };
-      const stat = git(clonePath, 'diff', '--shortstat', 'HEAD').trim();
+      // Compare the ORIGINAL base to the working tree (not HEAD) so a COMMITTED deletion is
+      // still visible to the guard (round 4 #1).
+      const stat = git(clonePath, 'diff', '--shortstat', baseRef || 'HEAD', '--').trim();
       if (suspiciousDeletion(c.goal, stat)) return { pass: false, detail: { testOutput: `deletion-guard: ${stat}` } };
       return { pass: true, detail: { testOutput: 'ok' } };
     },
@@ -110,6 +112,31 @@ test('E2E: the deletion guard refuses a net-negative diff even when the test pas
   const r = await runCard(card, realDeps(repo, runEngine));
   assert.equal(r.outcome, 'parked');
   assert.match(r.testOutput, /deletion-guard/);   // test passed but the guard refused it
+  const clonePath = path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_'));
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(clonePath, { recursive: true, force: true });
+});
+
+test('E2E: the deletion guard catches a COMMITTED net-negative diff, not just uncommitted (round 4 #1)', async () => {
+  const repo = newRepo((d) => {
+    fs.writeFileSync(path.join(d, 'always-pass.mjs'), 'process.exit(0);');
+    fs.writeFileSync(path.join(d, 'feature.js'), Array.from({ length: 60 }, (_, i) => `const line${i} = ${i};`).join('\n'));
+  });
+  const card = {
+    project: 'delc', repoPath: repo, goal: 'add a lazy-load feature to the gallery',
+    acceptanceArgv: ['node', 'always-pass.mjs'], acceptanceTimeoutSec: 20,
+    branch: 'ghost/delc', maxIterations: 1, maxTurns: 5, maxBudgetUsd: 1, situation: 'kickoff', engine: 'claude',
+  };
+  const runEngine = async ({ cwd }) => {
+    fs.writeFileSync(path.join(cwd, 'feature.js'), 'const line0 = 0;');   // delete 59 lines...
+    // ...and COMMIT it, so `git diff HEAD` would see an empty tree. Only baseRef..worktree reveals it.
+    git(cwd, 'config', 'user.email', 'a@b'); git(cwd, 'config', 'user.name', 'a');
+    git(cwd, 'add', '-A'); git(cwd, 'commit', '-q', '-m', 'refactor: simplify');
+    return { exitCode: 0, result: { subtype: 'success', result: 'done' }, usage: { input_tokens: 10, output_tokens: 5 }, text: 'all done' };
+  };
+  const r = await runCard(card, realDeps(repo, runEngine));
+  assert.equal(r.outcome, 'parked');               // a destructive COMMIT must not pass acceptance
+  assert.match(r.testOutput, /deletion-guard/);
   const clonePath = path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_'));
   fs.rmSync(repo, { recursive: true, force: true });
   fs.rmSync(clonePath, { recursive: true, force: true });
