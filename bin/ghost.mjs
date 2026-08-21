@@ -175,8 +175,11 @@ async function main() {
         arm({ sendoff: goal, project }); armed = true;
         const st = readState(); st.queue = cards; writeState(st);
         fs.mkdirSync(REPORT_DIR, { recursive: true });
-        reconcile({ activeBranches: cards.map(c => c.branch) });
-        reap({ keep: cards.map(c => c.branch.replace(/[^\w.-]/g, '_')) });
+        // Preserve orphaned clones from a crashed prior night (unfinished, never branched back)
+        // by adding them to the keep-list — reaping them would silently destroy that work (round 5 H2).
+        const orphans = reconcile({ activeBranches: cards.map(c => c.branch) });
+        if (orphans.length) console.log(`  ↩ preserving ${orphans.length} orphaned clone(s) from a prior run: ${orphans.join(', ')}`);
+        reap({ keep: [...cards.map(c => c.branch.replace(/[^\w.-]/g, '_')), ...orphans] });
         caff = startCaffeinate();
         writeHeartbeat();
         hb = setInterval(() => writeHeartbeat(), 120_000);

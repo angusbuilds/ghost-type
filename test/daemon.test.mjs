@@ -56,6 +56,17 @@ test('reap refuses to escape the work dir via .. or absolute names (M2)', () => 
   assert.deepEqual(removed, ['/w/ghost_ok']);   // only the contained child was removed
 });
 
+test('orphaned clones from a crashed night are preserved, not reaped (round 5 H2)', () => {
+  const present = ['ghost_active', 'ghost_orphan_from_crash'];
+  // reconcile identifies the crash orphan (a clone not tied to any active branch)...
+  const orphans = reconcile({ workDir: '/w', list: () => present, activeBranches: ['ghost/active'] });
+  assert.deepEqual(orphans, ['ghost_orphan_from_crash']);
+  // ...and adding it to the keep-list means reap leaves the unfinished work alone.
+  const removed = [];
+  reap({ workDir: '/w', keep: ['ghost_active', ...orphans], list: () => present, rm: (p) => removed.push(p) });
+  assert.deepEqual(removed, []);
+});
+
 test('reap refuses a SYMLINKED work root outright — deletes nothing (round 4: no test covered this)', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-reap-'));
   const realWork = path.join(base, 'real'); fs.mkdirSync(realWork);

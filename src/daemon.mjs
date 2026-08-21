@@ -20,7 +20,12 @@ export function writeState(s) { writeJson(STATE_FILE, s); }
 // refuses. A failed probe used to read as "safe" (not-on-battery / infinite disk), letting
 // the ghost run unattended with no validated power or headroom (round 4 #9).
 export function realOnBattery() {
-  try { return /Battery Power/.test(execFileSync('pmset', ['-g', 'batt']).toString()); } catch { return null; }
+  try {
+    const out = execFileSync('pmset', ['-g', 'batt']).toString();
+    if (/Battery Power/.test(out)) return true;
+    if (/AC Power/.test(out)) return false;
+    return null;   // unrecognized pmset output → unknown power state → armChecks refuses (round 5 M2)
+  } catch { return null; }
 }
 export function realFreeDiskGB(dir = WORK_DIR) {
   try {
