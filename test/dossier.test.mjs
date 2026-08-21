@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { detectTestRunner, scanRepo } from '../src/dossier.mjs';
+import { detectTestRunner, scanRepo, runnerAvailable } from '../src/dossier.mjs';
 
 function tmp(files) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-dos-'));
@@ -37,8 +37,22 @@ test('ignores the npm placeholder test script', () => {
 
 test('scanRepo reports runner + canRunUnattended', () => {
   const d = tmp({ 'Cargo.toml': '', 'RESUME.md': 'x' });
-  const dossier = scanRepo(d, { gitRunner: () => '' });
+  const dossier = scanRepo(d, { gitRunner: () => '', hasExe: () => true });   // cargo present
   assert.deepEqual(dossier.testRunner, ['cargo', 'test']);
   assert.equal(dossier.canRunUnattended, true);
   assert.equal(dossier.hasResume, true);
+});
+
+test('a detected runner whose executable is MISSING is not runnable unattended (round 4 #11)', () => {
+  const d = tmp({ 'pyproject.toml': '' });
+  const dossier = scanRepo(d, { gitRunner: () => '', hasExe: () => false });   // pytest not installed
+  assert.deepEqual(dossier.testRunner, ['pytest', '-q']);   // still detected...
+  assert.equal(dossier.runnerReady, false);
+  assert.equal(dossier.canRunUnattended, false);            // ...but not gradeable
+});
+
+test('runnerAvailable is false for an empty/absent runner', () => {
+  assert.equal(runnerAvailable(null, { hasExe: () => true }), false);
+  assert.equal(runnerAvailable([], { hasExe: () => true }), false);
+  assert.equal(runnerAvailable(['npm', 'test'], { hasExe: () => true }), true);
 });

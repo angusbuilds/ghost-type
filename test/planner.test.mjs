@@ -22,6 +22,14 @@ test('a runnerless repo becomes a proposal-only card', () => {
   assert.equal(isCodingCard(cards[0]), false);
 });
 
+test('a repo whose runner is detected but UNAVAILABLE becomes a proposal, not a doomed coding card (round 4 #11)', () => {
+  const d = { name: 'pyapp', repoPath: '/d/pyapp', testRunner: ['pytest', '-q'], canRunUnattended: false };
+  const { cards } = planCards({ sendoff: 'x', dossiers: [d], dateStr: '2026-08-21' });
+  assert.equal(cards[0].kind, 'proposal');
+  assert.equal(isCodingCard(cards[0]), false);
+  assert.match(cards[0].reason, /pytest.*not available/);
+});
+
 test('review backpressure pauses a project over the threshold', () => {
   const { cards, paused } = planCards({ sendoff: 'x', dossiers: [dossiers[0]], dateStr: '2026-08-21', unmergedByProject: { sitecraft: 3 }, backpressureThreshold: 3 });
   assert.equal(cards.length, 0);

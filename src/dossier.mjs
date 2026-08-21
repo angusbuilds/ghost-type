@@ -27,16 +27,28 @@ export function detectTestRunner(repoPath) {
   return null;
 }
 
-export function scanRepo(repoPath, { gitRunner = git } = {}) {
+// Is the runner's executable actually on PATH? A detected runner whose binary isn't installed
+// (e.g. a pyproject repo on a box with no pytest) would fail every unattended iteration, so it
+// must NOT count as runnable (round 4 #11).
+function realHasExe(bin) {
+  try { execFileSync('/bin/sh', ['-c', `command -v ${bin}`], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+export function runnerAvailable(argv, { hasExe = realHasExe } = {}) {
+  return Array.isArray(argv) && argv.length > 0 && hasExe(argv[0]);
+}
+
+export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}) {
   const name = path.basename(repoPath.replace(/\/$/, ''));
   const testRunner = detectTestRunner(repoPath);
+  const runnerReady = testRunner ? runnerAvailable(testRunner, { hasExe }) : false;
   let branch = '', lastCommit = '', dirty = false;
   try { branch = gitRunner(repoPath, 'rev-parse', '--abbrev-ref', 'HEAD').trim(); } catch { /* not a repo */ }
   try { lastCommit = gitRunner(repoPath, 'log', '-1', '--format=%h %s').trim(); } catch { /* empty */ }
   try { dirty = gitRunner(repoPath, 'status', '--porcelain').trim().length > 0; } catch { /* ignore */ }
   return {
-    name, repoPath, testRunner,
-    canRunUnattended: Boolean(testRunner),
+    name, repoPath, testRunner, runnerReady,
+    // Runnable unattended only if a runner is detected AND its executable resolves.
+    canRunUnattended: Boolean(testRunner) && runnerReady,
     branch, lastCommit, dirty,
     hasResume: fs.existsSync(path.join(repoPath, 'RESUME.md')),
     hasTodo: fs.existsSync(path.join(repoPath, 'TODO.md')) || fs.existsSync(path.join(repoPath, 'TODO')),

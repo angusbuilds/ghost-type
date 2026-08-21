@@ -21,7 +21,11 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
     if ((unmergedByProject[d.name] || 0) >= backpressureThreshold) { paused.push(d.name); continue; }
     const goal = (sendoff && sendoff.trim()) || `continue the current work on ${d.name}`;
     const branch = branchName(d.name, dateStr, goal);
-    if (d.testRunner) {
+    // A repo is codeable only if it has a runner AND that runner is actually usable. When a
+    // scan set canRunUnattended, honor it (it already folds in executable availability, round
+    // 4 #11); hand-built dossiers without the flag fall back to runner-presence.
+    const runnable = d.canRunUnattended !== undefined ? d.canRunUnattended : Boolean(d.testRunner);
+    if (d.testRunner && runnable) {
       cards.push(validateCard({
         project: d.name, repoPath: d.repoPath, goal,
         acceptanceArgv: d.testRunner, acceptanceTimeoutSec: 600, branch,
@@ -32,7 +36,9 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
       // iteration/token budget, and is reported as its own category.
       cards.push({
         project: d.name, repoPath: d.repoPath, goal, branch, kind: 'proposal',
-        reason: 'no test runner detected — cannot verify unattended', situation: 'kickoff',
+        reason: d.testRunner ? `test runner "${d.testRunner[0]}" not available on PATH — cannot verify unattended`
+                             : 'no test runner detected — cannot verify unattended',
+        situation: 'kickoff',
       });
     }
     if (cards.length >= maxCards) break;
