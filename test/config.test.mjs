@@ -52,6 +52,19 @@ test('midnight (hour 0) is a VALID deadline and a real engine name survives (rou
   assert.equal(cfg.defaultEngine, 'codex');
 });
 
+test('the shipped example config documents every real knob and loads cleanly', () => {
+  const example = JSON.parse(fs.readFileSync(new URL('../examples/config.example.json', import.meta.url)));
+  for (const k of Object.keys(DEFAULTS)) {
+    assert.ok(k in example, `examples/config.example.json is missing the "${k}" knob`);
+  }
+  // and every example value must survive validation (i.e. the example itself is valid)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-ex-'));
+  const f = path.join(dir, 'config.json'); fs.writeFileSync(f, JSON.stringify(example));
+  const cfg = loadConfig(f);
+  for (const k of Object.keys(DEFAULTS)) assert.equal(cfg[k], example[k], `example value for "${k}" was rejected`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('nightDeadlineMs returns the next occurrence of the configured hour', () => {
   const now = Date.parse('2026-08-21T22:00:00');   // 10pm local
   const ms = nightDeadlineMs({ nightDeadlineHour: 7 }, now);
