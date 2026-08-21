@@ -47,11 +47,15 @@ fails **toward "park and report", never toward "keep burning."**
 ## Foundational safety mechanisms (cut across every component)
 
 - **Throwaway local clone per task**, not a worktree. `git clone --local <repo>
-  ~/.ghosttype/work/<task>` is hardlinked (cheap on one volume) and has its own
-  `.git/config` + hooks dir, so nothing the session does can leak into the real repo's
-  git behavior. First action after clone: `git remote remove origin`. Push, `gh`,
-  deploy have nowhere to go. Result is pulled back as a branch via `git fetch` from the
-  clone into the real repo at report time — never the reverse.
+  ~/.ghosttype/work/<task>` gives a fully isolated clone with its own `.git/config` +
+  hooks dir, so nothing the session does can leak into the real repo's git behavior.
+  (Disk-cheap because git hardlinks the `.git/objects` store when source and
+  destination share a filesystem; the working tree is its own separate checkout, not
+  hardlinked — so edits never touch the real repo's files.) The clone path is validated
+  to be under `~/.ghosttype/work/` before any work begins. First action after clone:
+  `git remote remove origin` — push, `gh`, deploy have nowhere to go. The result is
+  pulled back as a branch via `git fetch` from the clone into the real repo at report
+  time — never the reverse.
 - **`GHOST_SESSION=1`** stamped on every spawned session's environment. A wrapper around
   `dcg` refuses `dcg allow` when that marker is present, so a ghost session can't
   disarm its own guardrails. The global dcg + guard.py PreToolUse hooks still apply
@@ -107,8 +111,9 @@ hand-rolled stream parsing.
   typing to interrupt in v1 (that's haunt mode, Phase 2).
 - `ghost on "<send-off>"` arms; **`ghost on` with no send-off** falls back to
   continuing the highest-priority parked/most-recently-active project — never a no-op.
-  Optional auto-arm at a set hour unless `ghost off`, so the habit doesn't depend on a
-  tired nightly command.
+  **v1 requires explicit arming** — unattended execution never starts on its own.
+  (Scheduled auto-arm is a Phase-2 opt-in with a visible schedule and an easy disable
+  control, so the habit doesn't depend on a tired nightly command.)
 
 ### 2. Voice Profile Builder — `ghost learn`
 
