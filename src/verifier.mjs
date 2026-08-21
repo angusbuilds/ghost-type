@@ -15,20 +15,24 @@ export function runAcceptance(argv, cwd, timeoutSec, env = buildSessionEnv([], p
     const child = spawn(argv[0], argv.slice(1), { cwd, env, detached: true });
     const CAP = 256 * 1024;
     let out = '', outBytes = 0, err = '', errBytes = 0;
-    let timedOut = false;
+    let settled = false;
+    const diagOf = () => [err.trim(), out.trim()].filter(Boolean).join('\n').split('\n').slice(0, 12).join('\n');
+    const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
     const kill = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } };
-    const timer = setTimeout(() => { timedOut = true; kill(); }, timeoutSec * 1000);
+    // Settle at the deadline INDEPENDENTLY of 'close' — a detached grandchild holding our stdout
+    // would otherwise delay 'close' well past the timeout (round 7 High#1).
+    const timer = setTimeout(() => {
+      kill();
+      try { child.unref(); child.stdout.destroy(); child.stderr.destroy(); } catch { /* gone */ }
+      finish({ pass: false, code: null, stderrHead: diagOf(), timedOut: true });
+    }, timeoutSec * 1000);
     // Drain BOTH streams, bounded. An unconsumed stdout fills the OS pipe buffer and deadlocks
     // a chatty test into a false timeout (round 5 M1); and most runners (node --test, pytest)
     // report failures on STDOUT, which the old code discarded — so capture it for the diagnostic.
     child.stdout.on('data', d => { if (outBytes < CAP) { out += d; outBytes += d.length; } });
     child.stderr.on('data', d => { if (errBytes < CAP) { err += d; errBytes += d.length; } });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      const diag = [err.trim(), out.trim()].filter(Boolean).join('\n').split('\n').slice(0, 12).join('\n');
-      resolve({ pass: !timedOut && code === 0, code, stderrHead: diag, timedOut });
-    });
-    child.on('error', (e) => { clearTimeout(timer); resolve({ pass: false, code: null, stderrHead: String(e.message), timedOut }); });
+    child.on('close', (code) => finish({ pass: code === 0, code, stderrHead: diagOf(), timedOut: false }));
+    child.on('error', (e) => finish({ pass: false, code: null, stderrHead: String(e.message), timedOut: false }));
   });
 }
 
@@ -90,23 +94,35 @@ export function suspiciousDeletion(goal, diffStat) {
 // A goal that EXPLICITLY asks to delete/remove — only then is a net-negative diff expected.
 const DELETION_GOAL = /\b(delete|remove|drop|clean\s*up|dead\s*code|prune|strip|deprecate|get\s*rid)\b/i;
 // Test/spec/config files whose deletion is almost always "make it pass by removing the test".
-const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|\.(test|spec)\.[a-z]+$|(^|\/)conftest\.py$|_test\.[a-z]+$/i;
+// Covers dir-based (test/, __tests__/), suffix (.test.js, _test.go) AND root-level (test_parser.py).
+const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test_[^/]+\.[a-z]+$|\.(test|spec)\.[a-z]+$|(^|\/)conftest\.py$|_test\.[a-z]+$/i;
 
-// Stronger destructive-change guard: inspects per-file deltas (`--numstat`) and deleted files
-// (`--name-status`), not just shortstat totals, so a non-"build" goal that guts a file, or a
-// padded net-positive diff that deletes a test, still fails (round 6 #3). Returns a reason or null.
+// Stronger destructive-change guard: inspects per-file deltas (`--numstat`) and file operations
+// (`--name-status`), not just shortstat totals. A non-"build" goal that guts a file, a padded
+// net-positive diff that deletes a test, deletions split across files, or a test renamed out of
+// discovery all fail (round 6 #3 / round 7 High#4). Returns a reason or null.
 export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
-  if (DELETION_GOAL.test(String(goal))) return null;   // deletion was explicitly requested
+  const g = String(goal);
+  const testGoal = /\b(test|spec)s?\b/i.test(g);
+  // Test-file removal/rename is checked ALWAYS (even under a deletion goal) unless the goal is
+  // explicitly about tests — deleting a test to pass is rarely the real intent (round 7 High#4).
   for (const l of String(nameStatus).split('\n')) {
-    const m = l.match(/^D\t(.+)$/);
-    if (m && TESTISH.test(m[1])) return `deletes test file ${m[1]}`;
+    const del = l.match(/^D\t(.+)$/);
+    if (del && TESTISH.test(del[1]) && !testGoal) return `deletes test file ${del[1]}`;
+    const ren = l.match(/^R\d*\t(.+)\t(.+)$/);
+    if (ren && TESTISH.test(ren[1]) && !TESTISH.test(ren[2]) && !testGoal) return `renames test ${ren[1]} out of test discovery`;
   }
+  if (DELETION_GOAL.test(g)) return null;   // explicit deletion goal — the size checks below don't apply
+  // Per-file gutting (>=100 catches exactly-100) OR aggregate net deletion across many files.
+  let aggNeg = 0;
   for (const l of String(numstat).split('\n')) {
     const [add, del, file] = l.split('\t');
-    if (file && /^\d+$/.test(add) && /^\d+$/.test(del) && Number(del) - Number(add) > 100) {
-      return `${file} lost ${Number(del) - Number(add)} net lines`;
-    }
+    if (!file || !/^\d+$/.test(add) || !/^\d+$/.test(del)) continue;
+    const net = Number(del) - Number(add);
+    if (net >= 100) return `${file} lost ${net} net lines`;
+    if (net > 0) aggNeg += net;
   }
+  if (aggNeg >= 150) return `net deletion of ${aggNeg} lines across files`;
   return null;
 }
 

@@ -159,6 +159,20 @@ test('driveStep clears stranded text with Ctrl-U when the agent exits to a shell
   assert.ok(sent.includes('C-u'), 'cleared the stranded line');
 });
 
+test('a failed writer call in haunt mode never injects the error text (round 7 Medium#1)', async () => {
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'keep fixing the parser', prev: 'agent output here', deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'claude' : 'agent output here',
+    sendKeys: (id, k) => sent.push(k), humanIdleSecs: () => 999,
+    // writer returns a FULL result with a nonzero exit + error text (as the real drive engine now does)
+    engine: async () => ({ exitCode: 1, result: null, text: 'network unreachable after retries' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'injected');
+  assert.doesNotMatch(r.prompt, /network unreachable/);   // the transport error is never injected
+  assert.match(r.prompt, /parser/);                       // falls back to the goal instead
+});
+
 test('driveStep keeps polling (does not terminate) while a subprocess/tool runs (round 4 #5)', async () => {
   // foreground is `git` (a tool the agent spawned) — neither shell nor agent → 'working', never 'shell'.
   const sent = [];

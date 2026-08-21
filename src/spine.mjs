@@ -3,6 +3,9 @@ import { classifyOutcome } from './watcher.mjs';
 import { shieldScan } from './sanitize.mjs';
 import { Ledger } from './ledger.mjs';
 import { log, byteCap } from './lib.mjs';
+import { DEFAULT_CALL_TIMEOUT_MS } from './engine.mjs';
+
+const MIN_CALL_USD = 0.05;   // below this, don't bother making a call — park as cost-exhausted
 
 // The card driver. Loops: run engine → classify → patch-guard → verify (grounding the
 // agent's claim) → pass ships, fail feeds a diagnosis + ledger + pre-flight-voted next
@@ -40,9 +43,21 @@ export async function runCard(card, deps) {
   // governor sees all of them and the token counter is honest (Codex H5).
   const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } const c = r?.costUsd ?? r?.result?.total_cost_usd; if (c) { costUsd += c; governor?.addCost(c); } return r; };
   const govCheck = () => { if (governor) { const c = governor.check(now()); if (!c.ok) { const e = new Error('GOVERNOR_TRIP'); e.trip = c.trip; throw e; } } };
+  // Bind EVERY call — main and writer — to the governor's remaining headroom: budget capped to
+  // remaining nightly dollars, timeout to min(45-min ceiling, time-to-deadline). Without this a
+  // call could overshoot the dollar cap or run the full 45 min past 07:00 (round 6/7 #8/High#3).
+  const boundCall = (nativeBudget) => {
+    if (!governor) return {};
+    const o = {};
+    const rem$ = governor.remainingUsd();
+    if (Number.isFinite(rem$)) o.maxBudgetUsd = Math.min(nativeBudget, rem$);
+    const remMs = governor.remainingMs(now());
+    o.timeoutMs = Math.min(DEFAULT_CALL_TIMEOUT_MS, Number.isFinite(remMs) ? remMs : DEFAULT_CALL_TIMEOUT_MS);
+    return o;
+  };
   // Check the cap immediately before EVERY writer call — diagnosis, each candidate, and the
   // vote — not once for the whole fan-out (Codex round 3 #4).
-  const writerEngine = async ({ prompt }) => { govCheck(); return meter(await runEngine({ cwd: clonePath, prompt, card, writer: true })); };
+  const writerEngine = async ({ prompt }) => { govCheck(); return meter(await runEngine({ cwd: clonePath, prompt, card, writer: true, ...boundCall(1) })); };
 
   // Compose the next prompt: forced diagnosis from the raw trace, the full attempt
   // ledger, then pre-flight candidate generation + a judge vote. Falls back to a single
@@ -81,20 +96,15 @@ export async function runCard(card, deps) {
   }
 
   while (iterations < card.maxIterations) {
-    // Stop before spending if the governor has tripped (token/deadline/consecutive-error).
-    if (governor) { const c = governor.check(now()); if (!c.ok) return { ...park(card, `governor: ${c.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd }; }
-    iterations += 1;
-    // Bound this call to the governor's REMAINING headroom, not just the card's native caps —
-    // otherwise the last call before a trip can overspend by a full card budget or run the whole
-    // 45-min timeout past the deadline (round 6 #8). Omitted when there's no governor.
-    const callOpts = { cwd: clonePath, prompt, card };
+    // Stop before spending if the governor has tripped (token/deadline/consecutive-error), OR if
+    // too little dollar headroom remains to make a useful call — don't round a near-zero budget up.
     if (governor) {
-      const budget = Math.min(card.maxBudgetUsd ?? Infinity, governor.remainingUsd());
-      if (Number.isFinite(budget)) callOpts.maxBudgetUsd = Math.max(0.01, budget);
-      const ms = governor.remainingMs(now());
-      if (Number.isFinite(ms)) callOpts.timeoutMs = Math.max(1000, ms);
+      const c = governor.check(now());
+      if (!c.ok) return { ...park(card, `governor: ${c.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
+      if (governor.remainingUsd() < MIN_CALL_USD) return { ...park(card, 'governor: cost-budget', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
     }
-    const eng = meter(await runEngine(callOpts));
+    iterations += 1;
+    const eng = meter(await runEngine({ cwd: clonePath, prompt, card, ...boundCall(card.maxBudgetUsd ?? Infinity) }));
     const outcome = classifyOutcome({ exitCode: eng.exitCode, result: eng.result, text: eng.text, nowMs: now() });
 
     if (outcome.state === 'rate-limited') {

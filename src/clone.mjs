@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { WORK_DIR, ensureState, log } from './lib.mjs';
 
 export function validateClonePath(p) {
@@ -53,9 +54,11 @@ export function makeClone(repoPath, taskId) {
   // it (reconcile then treats the renamed dir as an orphan and preserves it) instead of deleting
   // (round 6 #4). Only fall back to removal if the rename itself fails.
   if (fs.existsSync(clonePath)) {
-    const quarantine = `${clonePath}.crashed-${Date.now()}`;
+    // Collision-resistant name (ts + random) so two clones in the same ms don't clash; and if the
+    // rename FAILS we throw rather than delete — never destroy crashed work as a fallback (round 7 High#2).
+    const quarantine = `${clonePath}.crashed-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
     try { fs.renameSync(clonePath, quarantine); log({ evt: 'clone-quarantined', from: clonePath, to: quarantine }); }
-    catch { fs.rmSync(clonePath, { recursive: true, force: true }); }
+    catch (e) { throw new Error(`existing clone at ${clonePath} could not be quarantined — refusing to delete unsaved work: ${e.message}`); }
   }
   execFileSync('git', ['clone', '--local', '--no-hardlinks', '--quiet', path.resolve(repoPath), clonePath]);
   execFileSync('git', ['remote', 'remove', 'origin'], { cwd: clonePath });

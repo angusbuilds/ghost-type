@@ -67,4 +67,4 @@ if (result.mergeReady) {
   const clonePath = path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_'));
   fetchBranchBack(card.repoPath, clonePath, card.branch);
 }
-console.log('\n' + renderReport({ date: new Date().toISOString().slice(0, 10), cards: [result], tokens: 0, costUsd: 0 }));
+console.log('\n' + renderReport({ date: new Date().toISOString().slice(0, 10), cards: [result], tokens: result.tokensUsed || 0, costUsd: result.costUsd || 0 }));

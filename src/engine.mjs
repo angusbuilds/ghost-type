@@ -10,7 +10,7 @@ import { CLAUDE_BIN, CODEX_BIN } from './lib.mjs';
 //  - a wall-clock deadline that KILLS THE WHOLE PROCESS GROUP, so a single call can't run past
 //    the night deadline / budget and starve cleanup + reporting.
 const MAX_STREAM_BYTES = 8 * 1024 * 1024;      // 8MB/stream — a real session is far under this
-const DEFAULT_CALL_TIMEOUT_MS = 45 * 60 * 1000; // hard ceiling for one engine call
+export const DEFAULT_CALL_TIMEOUT_MS = 45 * 60 * 1000; // hard ceiling for one engine call
 
 // Head + rolling TAIL, not just a head. The terminal accounting event (Claude's `result`,
 // Codex's `token_count`) arrives at the END of the stream, so a head-only cap would discard
@@ -68,16 +68,23 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
   return new Promise((resolve) => {
     const child = spawn(exe, args, { cwd, env: env || process.env, detached: true });
     const out = capped(), err = capped();
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; killGroup(child); }, timeoutMs);
+    let settled = false;
+    const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
     child.stdout.on('data', d => out.push(d));
     child.stderr.on('data', d => err.push(d));
-    child.on('close', (code) => {
-      clearTimeout(timer);
+    // Settle at the deadline INDEPENDENTLY — don't wait for 'close', which a detached grandchild
+    // holding our stdout can delay indefinitely (round 7 High#1). Kill the group, detach, resolve.
+    const timer = setTimeout(() => {
+      killGroup(child);
+      try { child.unref(); child.stdout.destroy(); child.stderr.destroy(); } catch { /* already gone */ }
       const parsed = parseStreamJson(out.get());
-      // A timeout, signal (null), or nonzero exit is a transport failure so the watcher sees it.
-      const exitCode = timedOut ? 1 : (code == null ? 1 : code);
-      resolve({
+      finish({ exitCode: 1, result: null, costUsd: parsed.result?.total_cost_usd || 0, usage: parsed.usage,
+        text: `engine call exceeded ${Math.round(timeoutMs / 1000)}s — killed`, raw: out.get() });
+    }, timeoutMs);
+    child.on('close', (code) => {
+      const parsed = parseStreamJson(out.get());
+      const exitCode = code == null ? 1 : code;   // signal → nonzero so the watcher sees a failure
+      finish({
         exitCode,
         // A nonzero/signal exit is a transport failure — drop the result so the watcher
         // classifies it 'errored' (retry-capped), not a soft 'stalled' (round 4 #4).
@@ -86,12 +93,11 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
         // call is still metered by the dollar governor (round 5 M6).
         costUsd: parsed.result?.total_cost_usd || 0,
         usage: parsed.usage,
-        text: timedOut ? `engine call exceeded ${Math.round(timeoutMs / 1000)}s — killed`
-                       : (parsed.assistantText || parsed.result?.result || err.get()),
+        text: parsed.assistantText || parsed.result?.result || err.get(),
         raw: out.get(),
       });
     });
-    child.on('error', () => { clearTimeout(timer); resolve({ exitCode: 1, result: null, costUsd: 0, usage: null, text: err.get() || 'spawn error', raw: out.get() }); });
+    child.on('error', () => finish({ exitCode: 1, result: null, costUsd: 0, usage: null, text: err.get() || 'spawn error', raw: out.get() }));
   });
 }
 
@@ -124,31 +130,36 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
   return new Promise((resolve) => {
     const child = spawn(exe, args, { cwd, env: env || process.env, detached: true });
     const out = capped(), err = capped();
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; killGroup(child); }, timeoutMs);
+    let settled = false;
+    const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
     child.stdout.on('data', d => out.push(d));
     child.stderr.on('data', d => err.push(d));
+    // Settle at the deadline independently of 'close' (round 7 High#1).
+    const timer = setTimeout(() => {
+      killGroup(child);
+      try { child.unref(); child.stdout.destroy(); child.stderr.destroy(); } catch { /* already gone */ }
+      finish({ exitCode: 1, result: null, usage: null, text: `codex call exceeded ${Math.round(timeoutMs / 1000)}s — killed`, raw: out.get() });
+    }, timeoutMs);
     child.on('close', (code) => {
-      clearTimeout(timer);
       const p = parseCodexStream(out.get());
       const text = p.assistantText || err.get();
-      // ANY nonzero exit, signal (code === null), OR a timeout is a transport failure → no result,
-      // so the watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'.
-      // The text is still returned so rate/network detection can read it (Codex round 3 #6).
-      const exitCode = timedOut ? 1 : (code == null ? 1 : code);
+      // ANY nonzero exit or signal (code === null) is a transport failure → no result, so the
+      // watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'. The text
+      // is still returned so rate/network detection can read it (Codex round 3 #6).
+      const exitCode = code == null ? 1 : code;
       const crashed = exitCode !== 0;
-      resolve({
+      finish({
         exitCode,
         result: crashed ? null : { subtype: p.assistantText ? 'success' : 'error', result: text },
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
           output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,
         } : null,
-        text: timedOut ? `codex call exceeded ${Math.round(timeoutMs / 1000)}s — killed` : text,
+        text,
         raw: out.get(),
       });
     });
-    child.on('error', () => { clearTimeout(timer); resolve({ exitCode: 1, result: null, usage: null, text: err.get() || 'spawn error', raw: out.get() }); });
+    child.on('error', () => finish({ exitCode: 1, result: null, usage: null, text: err.get() || 'spawn error', raw: out.get() }));
   });
 }
 

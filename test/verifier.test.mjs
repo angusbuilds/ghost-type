@@ -80,6 +80,16 @@ test('runAcceptance kills the whole process group on timeout — a grandchild ca
   assert.ok(Date.now() - start < 6000, 'returned promptly — the grandchild did not hold it open');
 });
 
+test('runAcceptance settles at the deadline even when a grandchild ESCAPES the process group (round 7 High#1)', async () => {
+  const start = Date.now();
+  // grandchild is spawned DETACHED (its own group) inheriting stdout — it survives kill(-pid),
+  // so 'close' is delayed ~3s. We must still resolve at the ~1s deadline, not wait for it.
+  const script = "const{spawn}=require('node:child_process');const g=spawn(process.execPath,['-e','setTimeout(()=>{},3000)'],{stdio:'inherit',detached:true});g.unref();setInterval(()=>{},1000);";
+  const r = await runAcceptance(['node', '-e', script], process.cwd(), 1);
+  assert.equal(r.timedOut, true);
+  assert.ok(Date.now() - start < 2500, `settled at the deadline, not on the grandchild's exit (${Date.now() - start}ms)`);
+});
+
 test('verifyCard refuses a destructive diff even when the test passes (round 5 H1)', async () => {
   const d = tmpGit();
   // the feature exists AT base...
@@ -126,4 +136,19 @@ test('destructiveDiffReason catches gutting under a non-build goal and deleted t
   assert.equal(destructiveDiffReason('remove the dead module', '0\t400\told.js', 'D\told.js'), null);
   // a normal additive change is clean
   assert.equal(destructiveDiffReason('add a feature', '40\t3\tsrc/feature.js', 'A\tsrc/feature.js'), null);
+});
+
+test('destructiveDiffReason closes the round-7 High#4 bypasses', () => {
+  // root-level test file (test_parser.py) — not in a test/ dir
+  assert.match(destructiveDiffReason('make it green', '0\t50\ttest_parser.py', 'D\ttest_parser.py'), /deletes test file/);
+  // a deletion WORD present but not the intent ("add X and remove the stub") still catches a test deletion
+  assert.match(destructiveDiffReason('add lazy-load and remove the stub', '10\t5\tsrc/x.js\n0\t40\tsrc/core.test.js', 'M\tsrc/x.js\nD\tsrc/core.test.js'), /deletes test file/);
+  // deletions SPLIT across files (no single file >100) — aggregate catches it
+  assert.match(destructiveDiffReason('fix the build', '0\t60\ta.js\n0\t60\tb.js\n0\t60\tc.js', 'M\ta.js\nM\tb.js\nM\tc.js'), /across files/);
+  // EXACTLY 100 net deletions in one file
+  assert.match(destructiveDiffReason('fix it', '0\t100\tbig.js', 'M\tbig.js'), /100 net lines/);
+  // renaming a test OUT of discovery
+  assert.match(destructiveDiffReason('refactor', '0\t0\tx', 'R100\tsrc/core.test.js\tsrc/core.js'), /out of test discovery/);
+  // an explicit TEST goal may legitimately remove a test
+  assert.equal(destructiveDiffReason('remove the flaky parser test', '0\t40\tsrc/parser.test.js', 'D\tsrc/parser.test.js'), null);
 });
