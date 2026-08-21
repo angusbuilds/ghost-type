@@ -40,7 +40,24 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
 - **Audited by Codex** (`gpt-5.6-sol`, xhigh) across multiple rounds — every finding fixed,
   each round catching what the previous round's fix left partial.
 
+### Hardening (round 4)
+- Deletion guard compares the original base to the full working tree, so a **committed**
+  destructive diff can't pass acceptance — not just uncommitted ones.
+- Live injection is fully fail-closed: a generic `node`/`python` process counts as an agent
+  only if its argv names one; the Enter keystroke is re-guarded after the type→pause; the
+  drive terminates only on a real shell prompt (never a running tool), so it can't be fooled
+  by a subprocess or spin forever on an exited shell.
+- Power/disk arm-checks fail **closed** — an unreadable probe (or NaN/Infinity) refuses to arm.
+- Config is validated per-field (hour 0–23, integer counts, `minStable ≥ 2`, engine enum);
+  an out-of-range value keeps the safe default instead of defeating a limit.
+- A nonzero engine exit drops its result (classified `errored`, not a soft loop); exemplars
+  are byte-capped at storage; review backpressure counts real `ghost/*` branches; the morning
+  notification fires even if the report render fails; report cells/fences are escaped; a
+  detected test runner counts as runnable only if its executable resolves.
+
 ### Proof
-- 156 offline unit tests (`node --test`), zero runtime dependencies.
-- Soup-to-nuts e2e on real git/fs (only the LLM scripted).
+- 173 offline unit tests (`node --test`), zero runtime dependencies.
+- Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. a committed-deletion attack.
 - A live smoke shipped a real feature end-to-end with real tokens, main untouched.
+- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across five rounds — each round
+  verifying the prior round's fixes held and were complete, not just plausible.

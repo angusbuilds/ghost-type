@@ -145,7 +145,7 @@ async function main() {
       const project = options.project;
       const dryRun = Boolean(options['dry-run']);
       if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
-      const engine = options.engine || 'claude';
+      const engine = options.engine || CONFIG.defaultEngine;
 
       const checks = armChecks();
       if (!checks.ok) {
@@ -250,7 +250,7 @@ async function main() {
       const goal = positionals.slice(1).join(' ');
       if (!paneId || !goal) throw new UsageError('ghost drive <pane-id> "<goal>"');
       if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
-      const engine = options.engine || 'claude';
+      const engine = options.engine || CONFIG.defaultEngine;
       let maxInjects = 20;
       if (options.max !== undefined) {
         const m = Number(options.max);
