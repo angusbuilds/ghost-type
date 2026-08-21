@@ -19,7 +19,7 @@ import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, re
 import { runCard } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
-import { runAcceptance, patchApplied, classifyClaim } from '../src/verifier.mjs';
+import { runAcceptance, patchApplied, classifyClaim, suspiciousDeletion } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
@@ -100,7 +100,13 @@ function cardDeps(card, voice) {
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
     verify: async (c, clonePath) => {
       const r = await runAcceptance(c.acceptanceArgv, clonePath, c.acceptanceTimeoutSec);
-      return { pass: r.pass, detail: { testOutput: r.pass ? 'acceptance passed (exit 0)' : r.stderrHead } };
+      if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead } };
+      // Test passed — but did it "pass" by deleting the feature? (the overnight classic)
+      const stat = git(clonePath, 'diff', '--shortstat', 'HEAD').trim();
+      if (suspiciousDeletion(c.goal, stat)) {
+        return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
+      }
+      return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' } };
     },
     classifyClaim, diagnoseFailure, generateCandidates, voteBest, writeNextPrompt,
     voiceProfile: voice.profile,

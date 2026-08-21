@@ -46,6 +46,13 @@ export function netLinesGutted(diffStat) {
   return del > ins;
 }
 
+// The "fixed the bug by deleting the feature" guard: a build/add goal whose diff is
+// net-negative is suspicious even if the test passed. Cheap, no tokens.
+const BUILD_GOAL = /\b(add|build|make|create|implement|support|feature|new)\b/i;
+export function suspiciousDeletion(goal, diffStat) {
+  return BUILD_GOAL.test(String(goal)) && netLinesGutted(String(diffStat));
+}
+
 // LLM judge, fed only fenced/scrubbed diff text. Fail-closed: anything but a clear
 // yes is treated as not-implemented by the caller.
 export async function diffSanity({ goal, diffStat, diffExcerpt, engine }) {

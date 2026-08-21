@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion } from '../src/verifier.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -51,4 +51,11 @@ test('runAcceptance times out', async () => {
 test('netLinesGutted flags a net-negative diff', () => {
   assert.equal(netLinesGutted(' 3 files changed, 2 insertions(+), 40 deletions(-)'), true);
   assert.equal(netLinesGutted(' 3 files changed, 40 insertions(+), 2 deletions(-)'), false);
+});
+
+test('suspiciousDeletion catches a net-negative diff on a build goal, ignores refactors', () => {
+  const gutted = ' 1 file changed, 2 insertions(+), 90 deletions(-)';
+  assert.equal(suspiciousDeletion('add a lazy-load feature to the gallery', gutted), true);
+  assert.equal(suspiciousDeletion('remove the dead code path', gutted), false);   // deletion IS the goal
+  assert.equal(suspiciousDeletion('add a feature', ' 1 file changed, 90 insertions(+), 2 deletions(-)'), false);
 });
