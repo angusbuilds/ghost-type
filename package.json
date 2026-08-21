@@ -1,0 +1,17 @@
+{
+  "name": "ghost-type",
+  "version": "0.1.0",
+  "description": "An always-on daemon that keeps coding agents working while you're away — and writes the next prompt in your voice.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ghost-run-card": "bin/ghost-run-card.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "license": "MIT"
+}

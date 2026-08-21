@@ -1,0 +1,51 @@
+// test/spine.test.mjs
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { runCard } from '../src/spine.mjs';
+
+const card = {
+  project: 'demo', repoPath: '/tmp/none', goal: 'pass the test',
+  acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, branch: 'ghost/2026-08-21-demo',
+  maxIterations: 3, maxTurns: 5, maxBudgetUsd: 1, situation: 'kickoff',
+};
+
+function deps(overrides = {}) {
+  return {
+    now: () => Date.parse('2026-08-21T22:00:00Z'),
+    makeClone: () => '/tmp/fake-clone',
+    commit: () => {},
+    gitDiff: () => ({ stat: ' 1 file changed, 5 insertions(+)', excerpt: 'diff' }),
+    runEngine: async () => ({ exitCode: 0, result: { subtype: 'success', result: 'done' }, usage: { input_tokens: 10, output_tokens: 5 }, text: 'done' }),
+    verify: async () => ({ pass: true, detail: { testOutput: 'ok' } }),
+    writeNextPrompt: async () => 'keep going',
+    ...overrides,
+  };
+}
+
+test('a card that verifies on iteration 1 ships', async () => {
+  const r = await runCard(card, deps());
+  assert.equal(r.outcome, 'shipped');
+  assert.equal(r.mergeReady, true);
+  assert.equal(r.iterations, 1);
+});
+
+test('a card that never verifies parks after maxIterations', async () => {
+  const r = await runCard(card, deps({ verify: async () => ({ pass: false, detail: { testOutput: 'fail' } }) }));
+  assert.equal(r.outcome, 'parked');
+  assert.equal(r.mergeReady, false);
+  assert.equal(r.iterations, 3);
+  assert.ok(r.promptsWritten.length >= 1);        // wrote next-prompts between tries
+});
+
+test('a rate-limited engine result does not burn an iteration as a failure', async () => {
+  let calls = 0;
+  const r = await runCard(card, deps({
+    runEngine: async () => {
+      calls += 1;
+      if (calls === 1) return { exitCode: 0, result: { subtype: 'error', result: 'usage limit reached, resets in 1h' }, usage: {}, text: 'usage limit reached, resets in 1h' };
+      return { exitCode: 0, result: { subtype: 'success', result: 'done' }, usage: {}, text: 'done' };
+    },
+    sleepUntil: async () => {},   // don't actually sleep in tests
+  }));
+  assert.equal(r.outcome, 'shipped');
+});
