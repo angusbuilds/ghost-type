@@ -35,4 +35,4 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
 - **Audited by Codex** (`gpt-5.6-sol`, xhigh) across three rounds — every finding fixed.
 
 ### Tests
-- 147 offline tests (`node --test`), zero runtime dependencies.
+- 152 offline tests (`node --test`), zero runtime dependencies.
