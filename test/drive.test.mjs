@@ -23,6 +23,22 @@ test('driveStep rejects unsafe generated text instead of typing it', async () =>
   assert.deepEqual(sent, []);                                             // nothing typed
 });
 
+test('driveStep refuses to type when the pane dropped to a bare shell (agent exited)', async () => {
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
+    runner: (...a) => {
+      if (a[0] === 'list-panes') return '%3';
+      if (a[0] === 'display-message') return 'zsh';   // foreground is a shell, not the agent
+      return 'agent output here';
+    },
+    sendKeys: (id, k) => sent.push(k), humanIdleSecs: () => 999,
+    engine: async () => ({ text: 'do the next thing' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'shell');
+  assert.deepEqual(sent, []);   // nothing typed into the shell
+});
+
 test('driveStep pauses if the human becomes active DURING generation (fresh recheck)', async () => {
   let idleCall = 0;
   const sent = [];

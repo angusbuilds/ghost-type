@@ -91,9 +91,13 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
       const p = parseCodexStream(out);
       const text = p.assistantText || err;
       const ok = code === 0 && Boolean(p.assistantText);
+      // A crash (nonzero exit, no agent message) yields NO result — so the watcher
+      // classifies it as a transport 'errored' with a retry cap, not a soft 'stalled'
+      // that loops (Codex re-audit #9).
+      const crashed = code !== 0 && !p.assistantText;
       resolve({
         exitCode: code ?? 0,
-        result: { subtype: ok ? 'success' : 'error', result: text },
+        result: crashed ? null : { subtype: ok ? 'success' : 'error', result: text },
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
           output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,

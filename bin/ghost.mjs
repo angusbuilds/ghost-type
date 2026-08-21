@@ -44,15 +44,20 @@ const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name) => { const i = rest.indexOf(name); return i >= 0 ? (rest[i + 1] ?? true) : undefined; };
 const has = (name) => rest.includes(name);
 
-// Explicit option parsing (Codex H10): value-flags consume exactly one arg; everything
-// else that isn't a flag is a positional. Prevents a flag's value being read as the goal.
+// Explicit, FAIL-CLOSED option parsing (Codex re-audit #3): a value-flag must be followed
+// by a real value (not another flag, not the end); unknown flags are rejected. Throws a
+// UsageError the caller turns into a usage message + exit 2 — never silently mis-parses.
+class UsageError extends Error {}
 function parseArgs(argv, valueFlags = [], boolFlags = []) {
   const options = {}; const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (valueFlags.includes(a)) options[a.replace(/^--/, '')] = argv[++i];
-    else if (boolFlags.includes(a)) options[a.replace(/^--/, '')] = true;
-    else if (a.startsWith('--')) options[a.replace(/^--/, '')] = true;   // unknown bool flag
+    if (valueFlags.includes(a)) {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith('--')) throw new UsageError(`${a} needs a value`);
+      options[a.replace(/^--/, '')] = v; i++;
+    } else if (boolFlags.includes(a)) options[a.replace(/^--/, '')] = true;
+    else if (a.startsWith('--')) throw new UsageError(`unknown option ${a}`);
     else positionals.push(a);
   }
   return { options, positionals };
@@ -69,7 +74,8 @@ function realEngine(card) {
   return ({ cwd, prompt, writer }) => runAgent({
     engine: card.engine, cwd,
     prompt: writer ? prompt : shapeForEngine(prompt, card.engine, card),
-    allowedTools: writer ? 'Read' : allowedTools,
+    allowedTools: writer ? 'Read' : allowedTools,      // Claude: read-only tools for writer
+    sandbox: writer ? 'read-only' : 'workspace-write', // Codex: read-only sandbox for writer (#1)
     maxTurns: writer ? 1 : card.maxTurns,
     maxBudgetUsd: writer ? 1 : card.maxBudgetUsd,
     env,
@@ -151,19 +157,20 @@ async function main() {
       arm({ sendoff: goal, project });
       const st = readState(); st.queue = cards; writeState(st);
 
-      // H9: a full lifecycle that ALWAYS reaches a terminal state — caffeinate + heartbeat
-      // held for the run, orphans reconciled, and the report/disarm/notify in `finally`.
+      // H9 + re-audit #6: EVERYTHING after arming lives in the try, and cleanup is
+      // ordered so nothing can skip disarm — even a setup or report-render failure.
       const voice = loadVoice();
       const gov = new Governor({ maxTokensNight: CONFIG.maxTokensNight, nightDeadlineMs: nightDeadlineMs(CONFIG), maxConsecErrors: CONFIG.maxConsecErrors });
-      fs.mkdirSync(REPORT_DIR, { recursive: true });
-      reconcile({ activeBranches: cards.map(c => c.branch) });
-      reap({ keep: cards.map(c => c.branch.replace(/[^\w.-]/g, '_')) });
-      const caff = startCaffeinate();
-      writeHeartbeat();
-      const hb = setInterval(() => writeHeartbeat(), 120_000);
       const results = [];
       let tripReason = null;
+      let caff = null, hb = null;
       try {
+        fs.mkdirSync(REPORT_DIR, { recursive: true });
+        reconcile({ activeBranches: cards.map(c => c.branch) });
+        reap({ keep: cards.map(c => c.branch.replace(/[^\w.-]/g, '_')) });
+        caff = startCaffeinate();
+        writeHeartbeat();
+        hb = setInterval(() => writeHeartbeat(), 120_000);
         for (const card of cards.filter(isCodingCard)) {
           const pre = gov.check(Date.now());
           if (!pre.ok) { tripReason = pre.trip; console.log(`\n⏹ stopping: ${pre.trip}`); break; }
@@ -179,17 +186,18 @@ async function main() {
           if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
         }
       } finally {
-        clearInterval(hb);
+        if (hb) clearInterval(hb);
         stopCaffeinate(caff);
-        const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
-        const md = renderReport(night);
-        fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
-        fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));
-        disarm();
-        notifyVerdict(night);
-        try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
-        console.log('\n' + md);
-        console.log(`\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
+        disarm();                                           // guaranteed FIRST — never skipped
+        try {
+          const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
+          const md = renderReport(night);
+          fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
+          fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));
+          notifyVerdict(night);
+          try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
+          console.log('\n' + md + `\n\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
+        } catch (e) { console.error('report error:', e.message); }
       }
       break;
     }
@@ -211,7 +219,12 @@ async function main() {
       const goal = positionals.slice(1).join(' ');
       if (!paneId || !goal) { console.log('usage: ghost drive <pane-id> "<goal>"'); break; }
       const engine = options.engine === 'codex' ? 'codex' : 'claude';
-      const maxInjects = Number(options.max) > 0 ? Number(options.max) : 20;
+      let maxInjects = 20;
+      if (options.max !== undefined) {
+        const m = Number(options.max);
+        if (!Number.isInteger(m) || m <= 0) throw new UsageError('--max must be a positive integer');
+        maxInjects = m;
+      }
       haunt(paneId);   // tint it purple while we drive
       // M5: always release the tint/state — on normal return, exception, or Ctrl-C.
       const cleanup = () => { try { unhaunt(paneId); } catch { /* pane gone */ } };
@@ -254,4 +267,7 @@ async function main() {
   }
 }
 
-main().catch(e => { console.error('ghost error:', e.message); process.exit(1); });
+main().catch(e => {
+  if (e instanceof UsageError) { console.error(`usage: ${e.message}`); process.exit(2); }
+  console.error('ghost error:', e.message); process.exit(1);
+});

@@ -26,10 +26,10 @@ test('runCodex returns the claude-shaped result so the spine is engine-agnostic'
   assert.equal(r.usage.input_tokens, 90);
 });
 
-test('runCodex marks a crash as error, not success', async () => {
+test('runCodex marks a crash with NO result so the watcher treats it as errored (re-audit #9)', async () => {
   const r = await runCodex({ cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'crash' }, bin: FAKE });
   assert.equal(r.exitCode, 1);
-  assert.notEqual(r.result?.subtype, 'success');
+  assert.equal(r.result, null);   // no synthesized result → classifyOutcome → 'errored', not 'stalled'
 });
 
 test('runAgent dispatches to codex when engine=codex', async () => {

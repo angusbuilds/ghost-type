@@ -2,6 +2,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 
 export const HOME = os.homedir();
 export const GHOST_HOME = path.join(HOME, '.ghosttype');
@@ -27,17 +28,21 @@ export function readJson(file, fallback) {
   }
 }
 
-// Atomic write: temp file + flush + rename, so a crash mid-write can never leave a
-// truncated JSON file that the next read treats as empty (Codex M1).
+// Atomic write: an EXCLUSIVE (O_EXCL) randomly-named temp + flush + rename, so a crash
+// mid-write can't leave a truncated file, a pre-planted symlink at the temp path can't be
+// followed, and the destination's mode is preserved (Codex M1 + re-audit #7).
 export function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  const fd = fs.openSync(tmp, 'w');
+  let mode = 0o600;
+  try { mode = fs.statSync(file).mode & 0o777; } catch { /* new file → keep 0600 */ }
+  const tmp = `${file}.tmp-${crypto.randomBytes(8).toString('hex')}`;
+  const fd = fs.openSync(tmp, 'wx', mode);   // O_CREAT|O_EXCL|O_WRONLY — never follows a symlink
   try {
     fs.writeFileSync(fd, JSON.stringify(value, null, 2));
     fs.fsyncSync(fd);
   } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, file);
+  try { fs.renameSync(tmp, file); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch { /* best effort */ } throw e; }
 }
 
 export function log(entry) {

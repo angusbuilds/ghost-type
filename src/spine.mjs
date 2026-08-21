@@ -44,6 +44,8 @@ export async function runCard(card, deps) {
   // ledger, then pre-flight candidate generation + a judge vote. Falls back to a single
   // writeNextPrompt when no candidates are produced. Shield-gates untrusted inputs.
   async function composeNext({ engText, testOutput }) {
+    // Don't spend on diagnosis/candidates/vote if the governor has already tripped (#2).
+    if (governor) { const c = governor.check(now()); if (!c.ok) { const e = new Error('GOVERNOR_TRIP'); e.trip = c.trip; throw e; } }
     const rawTrace = `${testOutput || ''}\n${engText || ''}`;
     const scan = shieldScan(rawTrace);
     if (scan.hit) { const e = new Error('SHIELD_HIT'); e.patterns = scan.patterns; throw e; }
@@ -102,7 +104,7 @@ export async function runCard(card, deps) {
       ledger.record({ iteration: iterations, prompt, outcome: 'no-patch', exitCode: null, stderrHead: lastTestOutput, howClose: 'agent produced no changes' });
       if (iterations >= card.maxIterations) return { ...park(card, 'no patch applied — working tree unchanged', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
       try { prompt = await composeNext({ engText: eng.text, testOutput: lastTestOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'no-patch', project: card.project }); }
-      catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; throw e; }
+      catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed }; throw e; }
       continue;
     }
 
@@ -124,7 +126,7 @@ export async function runCard(card, deps) {
     ledger.record({ iteration: iterations, prompt, outcome: 'fail', exitCode: 1, stderrHead: v.detail.testOutput, howClose: claim.claimedDone ? 'claimed done but tests failed' : 'tests failed' });
     if (iterations >= card.maxIterations) break;
     try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'fail', project: card.project }); }
-    catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; throw e; }
+    catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed }; throw e; }
   }
   return { ...park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
 }
