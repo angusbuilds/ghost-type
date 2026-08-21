@@ -58,8 +58,10 @@ export function runAcceptance(argv, cwd, timeoutSec, env = buildSessionEnv([], p
 // packaged ghost-run-card runner had no deletion guard). `baseRef` lets the guard see committed
 // changes too (round 4 #1); `git` is injectable for tests.
 const gitOut = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
-export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandbox = false } = {}) {
-  const r = await runAcceptance(card.acceptanceArgv, clonePath, card.acceptanceTimeoutSec, undefined, sandbox);
+export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandbox = false, acceptanceTimeoutSec } = {}) {
+  // acceptanceTimeoutSec (from the governor's remaining time) caps the test so it can't run its
+  // full card timeout past the nightly deadline (round 8 Medium).
+  const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);
   if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead || 'test failed' } };
   const ref = baseRef || 'HEAD';
   const stat = git(clonePath, 'diff', '--shortstat', ref, '--').trim();
@@ -110,33 +112,45 @@ export function suspiciousDeletion(goal, diffStat) {
 
 // A goal that EXPLICITLY asks to delete/remove — only then is a net-negative diff expected.
 const DELETION_GOAL = /\b(delete|remove|drop|clean\s*up|dead\s*code|prune|strip|deprecate|get\s*rid)\b/i;
-// Test/spec/config files whose deletion is almost always "make it pass by removing the test".
-// Covers dir-based (test/, __tests__/), suffix (.test.js, _test.go) AND root-level (test_parser.py).
-const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test_[^/]+\.[a-z]+$|\.(test|spec)\.[a-z]+$|(^|\/)conftest\.py$|_test\.[a-z]+$/i;
+// Test/spec files whose deletion is almost always "make it pass by removing the test". Covers
+// dir-based (test/, __tests__/), suffix (.test.js, _test.go, -test.js), root-level (test_parser.py,
+// test.js, tests.js) — the actual discovery patterns of the runners we support.
+const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test_[^/]+\.[a-z]+$|[._-](test|spec)\.[a-z]+$|(^|\/)conftest\.py$|(^|\/)tests?\.[a-z]+$/i;
 
-// Stronger destructive-change guard: inspects per-file deltas (`--numstat`) and file operations
-// (`--name-status`), not just shortstat totals. A non-"build" goal that guts a file, a padded
-// net-positive diff that deletes a test, deletions split across files, or a test renamed out of
-// discovery all fail (round 6 #3 / round 7 High#4). Returns a reason or null.
+// Stronger destructive-change guard: cross-references per-file deltas (`--numstat`) with file
+// operations (`--name-status`), not just shortstat totals. A non-"build" goal that guts a file,
+// a padded net-positive diff that deletes a test, deletions split across files, a test renamed
+// out of discovery, or a large BINARY asset deletion all fail (round 6 #3 / round 7-8). Returns
+// a reason or null.
 export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   const g = String(goal);
   const testGoal = /\b(test|spec)s?\b/i.test(g);
-  // Test-file removal/rename is checked ALWAYS (even under a deletion goal) unless the goal is
-  // explicitly about tests — deleting a test to pass is rarely the real intent (round 7 High#4).
+  const deletionGoal = DELETION_GOAL.test(g);
+  // Map each file to its numstat so we can tell a binary deletion (`-\t-`) from a text one.
+  const sizes = {};
+  for (const l of String(numstat).split('\n')) {
+    const [add, del, file] = l.split('\t');
+    if (file) sizes[file] = { add, del, binary: add === '-' || del === '-' };
+  }
+  // File-operation checks run ALWAYS (even under a deletion goal) unless the goal is explicitly
+  // about tests — deleting a test/binary to pass is rarely the real intent (round 7 High#4 / round 8).
   for (const l of String(nameStatus).split('\n')) {
     const del = l.match(/^D\t(.+)$/);
-    if (del && TESTISH.test(del[1]) && !testGoal) return `deletes test file ${del[1]}`;
+    if (del) {
+      if (TESTISH.test(del[1]) && !testGoal) return `deletes test file ${del[1]}`;
+      if (sizes[del[1]]?.binary && !deletionGoal) return `deletes binary asset ${del[1]}`;   // size hidden in numstat
+    }
     const ren = l.match(/^R\d*\t(.+)\t(.+)$/);
     if (ren && TESTISH.test(ren[1]) && !TESTISH.test(ren[2]) && !testGoal) return `renames test ${ren[1]} out of test discovery`;
   }
-  if (DELETION_GOAL.test(g)) return null;   // explicit deletion goal — the size checks below don't apply
+  if (deletionGoal) return null;   // explicit deletion goal — the size checks below don't apply
   // Per-file gutting (>=100 catches exactly-100) OR aggregate net deletion across many files.
   let aggNeg = 0;
-  for (const l of String(numstat).split('\n')) {
-    const [add, del, file] = l.split('\t');
-    if (!file || !/^\d+$/.test(add) || !/^\d+$/.test(del)) continue;
+  for (const f of Object.keys(sizes)) {
+    const { add, del } = sizes[f];
+    if (!/^\d+$/.test(add) || !/^\d+$/.test(del)) continue;   // binary handled above
     const net = Number(del) - Number(add);
-    if (net >= 100) return `${file} lost ${net} net lines`;
+    if (net >= 100) return `${f} lost ${net} net lines`;
     if (net > 0) aggNeg += net;
   }
   if (aggNeg >= 150) return `net deletion of ${aggNeg} lines across files`;

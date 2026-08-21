@@ -4,13 +4,16 @@
 const scenario = process.env.GHOST_FAKE_SCENARIO || 'success';
 const line = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 
-line({ type: 'session_configured', model: 'gpt-5-codex' });
+// Emits the CURRENT codex 0.148 schema (verified against the live CLI, round 8): assistant text
+// nested in item.completed, usage in turn.completed — not the old top-level agent_message/token_count.
+line({ type: 'thread.started', thread_id: 't0' });
+line({ type: 'turn.started' });
 if (scenario === 'success') {
-  line({ type: 'agent_message', text: 'created the FIXED file and it passes' });
-  line({ type: 'token_count', input_tokens: 90, output_tokens: 40 });
+  line({ type: 'item.completed', item: { id: 'i0', type: 'agent_message', text: 'created the FIXED file and it passes' } });
+  line({ type: 'turn.completed', usage: { input_tokens: 90, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 40, reasoning_output_tokens: 0 } });
   process.exit(0);
 } else if (scenario === 'stall') {
-  line({ type: 'agent_message', text: 'could not resolve the failure' });
+  line({ type: 'item.completed', item: { id: 'i0', type: 'agent_message', text: 'could not resolve the failure' } });
   process.exit(0);
 } else if (scenario === 'crash') {
   process.stderr.write('codex: fatal error\n');

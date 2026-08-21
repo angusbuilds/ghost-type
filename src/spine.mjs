@@ -135,8 +135,11 @@ export async function runCard(card, deps) {
     }
 
     // VERIFY — run the acceptance test ourselves; ground the agent's claim against it.
-    // baseRef lets verify see committed changes too, not just the uncommitted tree.
-    const v = await verify(card, clonePath, { gitDiff, baseRef });
+    // baseRef lets verify see committed changes too, not just the uncommitted tree. The
+    // acceptance timeout is capped to the governor's remaining time so the test can't run its
+    // full card timeout past the nightly deadline (round 8 Medium).
+    const acceptCap = governor ? Math.max(1, Math.min(card.acceptanceTimeoutSec ?? 600, Math.floor(governor.remainingMs(now()) / 1000))) : undefined;
+    const v = await verify(card, clonePath, { gitDiff, baseRef, acceptanceTimeoutSec: acceptCap });
     lastTestOutput = v.detail.testOutput;
     const claim = classifyClaim({ claimText: eng.text, verifyPass: v.pass });
     if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, tests failed' }); }

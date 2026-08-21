@@ -168,3 +168,13 @@ test('destructiveDiffReason closes the round-7 High#4 bypasses', () => {
   // an explicit TEST goal may legitimately remove a test
   assert.equal(destructiveDiffReason('remove the flaky parser test', '0\t40\tsrc/parser.test.js', 'D\tsrc/parser.test.js'), null);
 });
+
+test('destructiveDiffReason closes the round-8 bypasses: binary + more Node test names', () => {
+  // deleting a large BINARY asset (numstat shows -\t-) under a non-deletion goal
+  assert.match(destructiveDiffReason('fix parser', '-\t-\tassets/model.bin', 'D\tassets/model.bin'), /binary asset/);
+  // Node-discovered test names the old TESTISH missed: parser-test.js and root test.js
+  assert.match(destructiveDiffReason('make green', '0\t30\tparser-test.js', 'D\tparser-test.js'), /deletes test file/);
+  assert.match(destructiveDiffReason('make green', '0\t30\ttest.js', 'D\ttest.js'), /deletes test file/);
+  // a deletion goal still allows removing a stale binary
+  assert.equal(destructiveDiffReason('remove the old model asset', '-\t-\tassets/model.bin', 'D\tassets/model.bin'), null);
+});

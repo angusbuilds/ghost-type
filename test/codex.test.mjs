@@ -6,16 +6,27 @@ import { parseCodexStream, runCodex, runAgent } from '../src/engine.mjs';
 
 const FAKE = path.resolve('test/fake-codex.mjs');
 
-test('parseCodexStream takes the last agent_message and token usage', () => {
+test('parseCodexStream reads the CURRENT codex schema: item.completed text + turn.completed usage (round 8)', () => {
   const jsonl = [
-    JSON.stringify({ type: 'session_configured' }),
-    JSON.stringify({ type: 'agent_message', text: 'first' }),
-    JSON.stringify({ type: 'agent_message', text: 'final answer' }),
-    JSON.stringify({ type: 'token_count', input_tokens: 10, output_tokens: 5 }),
+    JSON.stringify({ type: 'thread.started', thread_id: 't' }),
+    JSON.stringify({ type: 'item.completed', item: { id: 'i0', type: 'error', message: 'a warning' } }),
+    JSON.stringify({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: 'final answer' } }),
+    JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } }),
   ].join('\n');
   const p = parseCodexStream(jsonl);
-  assert.equal(p.assistantText, 'final answer');
-  assert.equal(p.tokens.output_tokens, 5);
+  assert.equal(p.assistantText, 'final answer');   // nested item.completed text, not top-level
+  assert.equal(p.tokens.output_tokens, 5);          // turn.completed.usage
+  assert.equal(p.errorMsg, 'a warning');
+});
+
+test('parseCodexStream still reads the LEGACY top-level shape (backward compat)', () => {
+  const jsonl = [
+    JSON.stringify({ type: 'agent_message', text: 'legacy answer' }),
+    JSON.stringify({ type: 'token_count', input_tokens: 3, output_tokens: 2 }),
+  ].join('\n');
+  const p = parseCodexStream(jsonl);
+  assert.equal(p.assistantText, 'legacy answer');
+  assert.equal(p.tokens.output_tokens, 2);
 });
 
 test('runCodex returns the claude-shaped result so the spine is engine-agnostic', async () => {

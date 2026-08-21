@@ -106,18 +106,26 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
 // `agent_message` event (matching the proven codex-bridge parse on this machine).
 export function parseCodexStream(text) {
   const events = [];
-  let assistantText = '';
-  let tokens = null;
+  let assistantText = '', errorMsg = '', tokens = null;
   for (const line of String(text).split('\n')) {
     const s = line.trim();
     if (!s) continue;
     let ev;
     try { ev = JSON.parse(s); } catch { continue; }
     events.push(ev);
-    if (ev.type === 'agent_message' && typeof ev.text === 'string') assistantText = ev.text;   // last wins
+    // Current schema (codex 0.148+, verified against the live CLI): assistant text and usage are
+    // NESTED inside item.completed / turn.completed — the old top-level shape parsed nothing (round 8).
+    if (ev.type === 'item.completed' && ev.item) {
+      if (ev.item.type === 'agent_message' && typeof ev.item.text === 'string') assistantText = ev.item.text;   // last wins
+      if (ev.item.type === 'error' && typeof ev.item.message === 'string') errorMsg = ev.item.message;
+    }
+    if (ev.type === 'turn.completed' && ev.usage) tokens = ev.usage;
+    if (ev.type === 'turn.failed') errorMsg = ev.error?.message || 'codex turn failed';
+    // Legacy schema (older codex) — kept for backward compatibility.
+    if (ev.type === 'agent_message' && typeof ev.text === 'string') assistantText = ev.text;
     if (ev.type === 'token_count' || ev.type === 'usage') tokens = ev;
   }
-  return { events, assistantText, tokens };
+  return { events, assistantText, errorMsg, tokens };
 }
 
 // Drive Codex headless in the isolated clone. Returns the SAME shape as runEngine so the
@@ -142,7 +150,7 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
     }, timeoutMs);
     child.on('close', (code) => {
       const p = parseCodexStream(out.get());
-      const text = p.assistantText || err.get();
+      const text = p.assistantText || p.errorMsg || err.get();
       // ANY nonzero exit or signal (code === null) is a transport failure → no result, so the
       // watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'. The text
       // is still returned so rate/network detection can read it (Codex round 3 #6).
