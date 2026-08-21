@@ -14,11 +14,15 @@ export function checkEnv({ has, claudeVersion, onBattery, freeDiskGB, dcgPresent
 
   const gb = freeDiskGB();
   req('disk', gb >= 20, `${gb === Infinity ? '∞' : gb}GB free (need ≥20)`, false);
-  req('AC power', !onBattery(), onBattery() ? 'on battery — the machine will sleep' : 'plugged in', false);
+  // Sample power ONCE and require an explicit `false` (on AC) — an unknown/null probe must not
+  // read as "plugged in" via `!null`, matching what armChecks actually enforces (round 6 #11).
+  const battery = onBattery();
+  req('AC power', battery === false,
+    battery === false ? 'plugged in' : battery === true ? 'on battery — the machine will sleep' : 'power state unreadable', false);
 
   const fatalFail = checks.some(c => c.fatal && !c.ok);
   const ready = checks.every(c => c.ok || !c.fatal);
-  return { checks, ready, fatalFail, armable: !fatalFail && !onBattery() && gb >= 20 };
+  return { checks, ready, fatalFail, armable: !fatalFail && battery === false && gb >= 20 };
 }
 
 export function renderDoctor(result) {

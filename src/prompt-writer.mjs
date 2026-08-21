@@ -36,7 +36,11 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
   // Final backstop: cap the WHOLE assembled prompt so it can never exceed a safe argv/context
   // size even if several fields are near their individual caps (round 5 M7).
   const r = await engine({ prompt: byteCap(meta, 48000) });
-  return r.text.trim();
+  // Never turn a transport failure ("network unreachable") into the next prompt — restate the
+  // goal instead (round 6 #5). Empty text from a SUCCESSFUL call is passed through unchanged
+  // (callers treat empty as "nothing to inject"), so only the transport case falls back.
+  if (r && r.exitCode != null && r.exitCode !== 0) return card.goal;
+  return (r.text || '').trim();
 }
 
 // Force a written diagnosis from the RAW trace before any next-prompt is drafted.
@@ -50,5 +54,8 @@ export async function diagnoseFailure({ goal, rawTrace, engine }) {
       'In 1-3 sentences, diagnose exactly WHY it failed. Be specific and technical. Output only the diagnosis.',
     ].join('\n\n'),
   });
+  // A failed writer call must not become the diagnosis text (round 6 #5) — diagnosis is optional,
+  // so drop it and let the loop proceed without one.
+  if (r && r.exitCode != null && r.exitCode !== 0) return '';
   return (r.text || '').trim();
 }

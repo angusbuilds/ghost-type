@@ -11,8 +11,11 @@ const ENGINE_CREDS = {
   codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
 };
 
+// engine 'none' (or any non-provider value) admits ZERO credentials — used for running an
+// untrusted acceptance test, which never needs a provider key (round 6 #1). An unknown engine
+// failing closed (no creds) is safer than defaulting to a provider's keys.
 export function buildSessionEnv(extraAllow = [], src = process.env, engine = 'claude') {
-  const allow = new Set([...COMMON_ALLOW, ...(ENGINE_CREDS[engine] || ENGINE_CREDS.claude), ...extraAllow]);
+  const allow = new Set([...COMMON_ALLOW, ...(ENGINE_CREDS[engine] || []), ...extraAllow]);
   const out = {};
   for (const [k, v] of Object.entries(src)) if (allow.has(k)) out[k] = v;
   out.GHOST_SESSION = '1';

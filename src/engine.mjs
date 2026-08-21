@@ -12,11 +12,20 @@ import { CLAUDE_BIN, CODEX_BIN } from './lib.mjs';
 const MAX_STREAM_BYTES = 8 * 1024 * 1024;      // 8MB/stream — a real session is far under this
 const DEFAULT_CALL_TIMEOUT_MS = 45 * 60 * 1000; // hard ceiling for one engine call
 
-function capped() {
-  let buf = '', bytes = 0;
+// Head + rolling TAIL, not just a head. The terminal accounting event (Claude's `result`,
+// Codex's `token_count`) arrives at the END of the stream, so a head-only cap would discard
+// the final cost/usage on a large session and undercount the governor (round 6 #6). A session
+// under half the budget is captured whole; beyond that we keep the first and last halves.
+function capped(maxBytes = MAX_STREAM_BYTES) {
+  const half = Math.max(1, Math.floor(maxBytes / 2));
+  let head = '', headDone = false, tail = '';
   return {
-    push: (d) => { if (bytes < MAX_STREAM_BYTES) { buf += d; bytes += d.length; } },
-    get: () => buf,
+    push: (d) => {
+      const s = String(d);
+      if (!headDone) { head += s; if (Buffer.byteLength(head) >= half) headDone = true; }
+      else { tail += s; if (tail.length > half) tail = tail.slice(-half); }   // keep the END (final event)
+    },
+    get: () => (headDone && tail) ? head + '\n' + tail : head,
   };
 }
 function killGroup(child) {

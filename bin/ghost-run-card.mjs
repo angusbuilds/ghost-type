@@ -4,7 +4,8 @@
 import { loadCard } from '../src/card.mjs';
 import { runCard } from '../src/spine.mjs';
 import { makeClone, fetchBranchBack } from '../src/clone.mjs';
-import { runEngine } from '../src/engine.mjs';
+import { runAgent } from '../src/engine.mjs';
+import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
@@ -24,10 +25,14 @@ const deps = {
   makeClone,
   headRef: (clonePath) => git(clonePath, 'rev-parse', 'HEAD').trim(),
   patchApplied,
-  // Writer calls (diagnosis/candidates/vote) run read-only, tiny-budget; coding calls get the full tool set.
-  runEngine: ({ cwd, prompt, writer }) => runEngine({
-    cwd, prompt,
-    allowedTools: writer ? 'Read' : allowedTools,
+  // Dispatch by the CARD's engine (round 6 #7 — was hardwired to Claude, so a Codex card ran
+  // Claude with OpenAI creds). Writer calls (diagnosis/candidates/vote) run read-only,
+  // tiny-budget; coding calls get the shaped prompt + full tool set.
+  runEngine: ({ cwd, prompt, writer }) => runAgent({
+    engine: card.engine, cwd,
+    prompt: writer ? prompt : shapeForEngine(prompt, card.engine, card),
+    allowedTools: writer ? 'Read' : allowedTools,       // Claude read-only tools for writer
+    sandbox: writer ? 'read-only' : 'workspace-write',  // Codex read-only sandbox for writer
     maxTurns: writer ? 1 : card.maxTurns,
     maxBudgetUsd: writer ? 1 : card.maxBudgetUsd,
     env,

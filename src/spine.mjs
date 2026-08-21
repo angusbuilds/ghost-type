@@ -2,7 +2,7 @@
 import { classifyOutcome } from './watcher.mjs';
 import { shieldScan } from './sanitize.mjs';
 import { Ledger } from './ledger.mjs';
-import { log } from './lib.mjs';
+import { log, byteCap } from './lib.mjs';
 
 // The card driver. Loops: run engine → classify → patch-guard → verify (grounding the
 // agent's claim) → pass ships, fail feeds a diagnosis + ledger + pre-flight-voted next
@@ -56,14 +56,16 @@ export async function runCard(card, deps) {
 
     const diagnosis = await diagnoseFailure({ goal: card.goal, rawTrace, engine: writerEngine });
     // Voice MUST ride the primary (candidate) path, not just the fallback — otherwise the
-    // prompts the loop actually uses are voice-blind (bug caught by the prompting study).
-    const context = [
-      `WRITE EXACTLY IN THIS VOICE:\n${voiceProfile}`,
-      exemplars?.length ? `HOW HE WRITES:\n- ${exemplars.join('\n- ')}` : '',
+    // prompts the loop actually uses are voice-blind (bug caught by the prompting study). Every
+    // field is bounded here too: the candidate/vote path builds this context directly and would
+    // otherwise be uncapped, unlike the capped fallback writer (round 6 #5).
+    const context = byteCap([
+      `WRITE EXACTLY IN THIS VOICE:\n${byteCap(String(voiceProfile || ''), 4000)}`,
+      exemplars?.length ? `HOW HE WRITES:\n- ${byteCap(exemplars.join('\n- '), 4000)}` : '',
       `GOAL: ${card.goal}`,
-      diagnosis ? `DIAGNOSIS OF LAST FAILURE: ${diagnosis}` : '',
-      `ALREADY TRIED (do not repeat a dead end):\n${ledger.toTable()}`,
-    ].filter(Boolean).join('\n\n');
+      diagnosis ? `DIAGNOSIS OF LAST FAILURE: ${byteCap(diagnosis, 2000)}` : '',
+      `ALREADY TRIED (do not repeat a dead end):\n${byteCap(ledger.toTable(), 8000)}`,
+    ].filter(Boolean).join('\n\n'), 40000);
 
     const candidates = await generateCandidates({ context, n: 3, engine: writerEngine });
     if (candidates.length > 0) {
@@ -82,7 +84,17 @@ export async function runCard(card, deps) {
     // Stop before spending if the governor has tripped (token/deadline/consecutive-error).
     if (governor) { const c = governor.check(now()); if (!c.ok) return { ...park(card, `governor: ${c.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd }; }
     iterations += 1;
-    const eng = meter(await runEngine({ cwd: clonePath, prompt, card }));
+    // Bound this call to the governor's REMAINING headroom, not just the card's native caps —
+    // otherwise the last call before a trip can overspend by a full card budget or run the whole
+    // 45-min timeout past the deadline (round 6 #8). Omitted when there's no governor.
+    const callOpts = { cwd: clonePath, prompt, card };
+    if (governor) {
+      const budget = Math.min(card.maxBudgetUsd ?? Infinity, governor.remainingUsd());
+      if (Number.isFinite(budget)) callOpts.maxBudgetUsd = Math.max(0.01, budget);
+      const ms = governor.remainingMs(now());
+      if (Number.isFinite(ms)) callOpts.timeoutMs = Math.max(1000, ms);
+    }
+    const eng = meter(await runEngine(callOpts));
     const outcome = classifyOutcome({ exitCode: eng.exitCode, result: eng.result, text: eng.text, nowMs: now() });
 
     if (outcome.state === 'rate-limited') {

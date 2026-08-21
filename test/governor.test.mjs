@@ -42,3 +42,16 @@ test('ok when under all caps', () => {
   g.addUsage({ input_tokens: 100, output_tokens: 100 });
   assert.deepEqual(g.check(NOW), { ok: true, trip: null });
 });
+
+test('remainingUsd/remainingMs report headroom for per-call bounding (round 6 #8)', () => {
+  const g = new Governor({ ...caps, maxCostUsd: 10 });
+  g.addCost(9.99);
+  assert.ok(Math.abs(g.remainingUsd() - 0.01) < 1e-9);   // a call may spend at most ~$0.01 more
+  assert.equal(g.remainingMs(NOW), 3600_000);            // one hour to the deadline
+  assert.equal(g.remainingMs(NOW + 3600_000 + 5), 0);    // never negative past the deadline
+});
+
+test('remainingUsd is Infinity when no dollar cap is set (round 6 #8)', () => {
+  const g = new Governor(caps);   // no maxCostUsd → Infinity
+  assert.equal(g.remainingUsd(), Infinity);
+});

@@ -24,6 +24,15 @@ test('scrubs Stripe secret keys (underscore form) (round 5 #5)', () => {
   assert.match(out, /\[redacted-secret\]/);
 });
 
+test('scrubs all current GitHub token formats (round 6 #9)', () => {
+  const body = 'A1b2C3d4E5f6G7h8I9j0';
+  for (const tok of [`ghp_${body}`, `gho_${body}`, `ghu_${body}`, `ghs_${body}`, `ghr_${body}`, `github_pat_${body}${body}`]) {
+    const out = scrubSecrets(`token ${tok} here`);
+    assert.doesNotMatch(out, new RegExp(body), `leaked: ${tok}`);
+    assert.match(out, /\[redacted-secret\]/);
+  }
+});
+
 test('fence wraps text with a labeled data boundary', () => {
   const f = fence('DIFF', 'hello');
   assert.match(f, /BEGIN UNTRUSTED DIFF/);

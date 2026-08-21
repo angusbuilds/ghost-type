@@ -76,13 +76,15 @@ function realEngine(card) {
   // Dispatch by the card's engine. Coding calls get the shaped prompt + full tools; WRITER
   // calls (diagnosis/candidates/vote) get a read-only, tiny-budget model that can't touch
   // the clone (Codex H6) and aren't shaped (they're meta-prompts, not for the coding agent).
-  return ({ cwd, prompt, writer }) => runAgent({
+  return ({ cwd, prompt, writer, maxBudgetUsd, timeoutMs }) => runAgent({
     engine: card.engine, cwd,
     prompt: writer ? prompt : shapeForEngine(prompt, card.engine, card),
     allowedTools: writer ? 'Read' : allowedTools,      // Claude: read-only tools for writer
     sandbox: writer ? 'read-only' : 'workspace-write', // Codex: read-only sandbox for writer (#1)
     maxTurns: writer ? 1 : card.maxTurns,
-    maxBudgetUsd: writer ? 1 : card.maxBudgetUsd,
+    // A per-call governor bound (remaining nightly $) overrides the card's native budget (round 6 #8).
+    maxBudgetUsd: maxBudgetUsd ?? (writer ? 1 : card.maxBudgetUsd),
+    timeoutMs,                                         // per-call deadline bound; undefined → engine default
     env,
   });
 }
@@ -221,7 +223,10 @@ async function main() {
         if (hb) clearInterval(hb);
         stopCaffeinate(caff);
         if (armed) disarm();                                // guaranteed if we armed — never skipped
-        const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: results.reduce((n, r) => n + (r.costUsd || 0), 0), tripReason };
+        // Report the GOVERNOR's running cost, not the sum of completed cards — a card that
+        // threw after an engine call was metered would otherwise drop its cost from the report,
+        // hiding real spend (round 6 #10). gov.costUsd includes every metered call.
+        const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: gov.costUsd, tripReason };
         // Notify FIRST and on its OWN try — the failure notification is exactly the case
         // where visibility matters most, so a render/disk error must not swallow it (round 4 #10).
         try { notifyVerdict(night); } catch (e) { console.error('notify error:', e.message); }

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { WORK_DIR, ensureState } from './lib.mjs';
+import { WORK_DIR, ensureState, log } from './lib.mjs';
 
 export function validateClonePath(p) {
   const resolved = path.resolve(p);
@@ -18,12 +18,15 @@ export function validateClonePath(p) {
 export function assertNoSymlinkAncestor(dir, stopAt = os.homedir()) {
   const stop = path.resolve(stopAt);
   let p = path.resolve(dir);
-  while (p.startsWith(stop) && p.length >= stop.length) {
+  while (true) {
+    // Always check the CURRENT component (so a directly-symlinked target is caught wherever it
+    // lives); then walk up, but only through ancestors inside the guarded root — OS-level
+    // symlinks above HOME (/var, /tmp on macOS) are not attacker-controlled (round 5 L1 / round 6 #2).
     try { if (fs.lstatSync(p).isSymbolicLink()) throw new Error(`symlinked path component: ${p}`); }
     catch (e) { if (/symlinked path component/.test(e.message)) throw e; /* ENOENT ancestor → fine */ }
-    if (p === stop) break;
     const parent = path.dirname(p);
-    if (parent === p) break;
+    if (parent === p) break;                 // reached filesystem root
+    if (!parent.startsWith(stop)) break;     // ancestor left the guarded root → stop
     p = parent;
   }
 }
@@ -45,7 +48,15 @@ export function makeClone(repoPath, taskId) {
   const src = realOr(path.resolve(repoPath)) + path.sep;
   const work = realOr(WORK_DIR) + path.sep;
   if (src.startsWith(work) || work.startsWith(src)) throw new Error(`clone source overlaps the work dir: ${repoPath}`);
-  if (fs.existsSync(clonePath)) fs.rmSync(clonePath, { recursive: true, force: true });
+  // Don't silently destroy an existing clone at this path — a same-night restart regenerates
+  // the same deterministic branch/dir, and that clone holds the crashed run's work. Quarantine
+  // it (reconcile then treats the renamed dir as an orphan and preserves it) instead of deleting
+  // (round 6 #4). Only fall back to removal if the rename itself fails.
+  if (fs.existsSync(clonePath)) {
+    const quarantine = `${clonePath}.crashed-${Date.now()}`;
+    try { fs.renameSync(clonePath, quarantine); log({ evt: 'clone-quarantined', from: clonePath, to: quarantine }); }
+    catch { fs.rmSync(clonePath, { recursive: true, force: true }); }
+  }
   execFileSync('git', ['clone', '--local', '--no-hardlinks', '--quiet', path.resolve(repoPath), clonePath]);
   execFileSync('git', ['remote', 'remove', 'origin'], { cwd: clonePath });
   return clonePath;

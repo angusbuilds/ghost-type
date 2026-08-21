@@ -30,6 +30,14 @@ test('on battery or low disk is usable but not armable', () => {
   assert.equal(checkEnv({ ...base, onBattery: () => true }).fatalFail, false);
 });
 
+test('an UNKNOWN power state is not armable and not shown as plugged in (round 6 #11)', () => {
+  const r = checkEnv({ ...base, onBattery: () => null });
+  assert.equal(r.armable, false);   // null must not pass via !null
+  const ac = r.checks.find(c => c.name === 'AC power');
+  assert.equal(ac.ok, false);
+  assert.match(ac.detail, /unreadable/);
+});
+
 test('optional tools missing do not block readiness', () => {
   const r = checkEnv({ ...base, has: (n) => ['node', 'git', 'claude'].includes(n), dcgPresent: false });
   assert.equal(r.fatalFail, false);

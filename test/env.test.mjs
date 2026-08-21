@@ -34,6 +34,15 @@ test('a Claude session gets Anthropic creds, NOT OpenAI ones (round 5 M9)', () =
   assert.equal(env.OPENAI_API_KEY, undefined);
 });
 
+test("engine 'none' admits ZERO provider credentials — for running untrusted acceptance tests (round 6 #1)", () => {
+  const src = { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'ant', OPENAI_API_KEY: 'oai', CLAUDE_CODE_OAUTH_TOKEN: 'o' };
+  const env = buildSessionEnv([], src, 'none');
+  assert.equal(env.PATH, '/bin');                  // still runnable
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+  assert.equal(env.OPENAI_API_KEY, undefined);
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+});
+
 test('allowedToolsFor includes the test runner and git, excludes push/gh', () => {
   const a = allowedToolsFor(['npm', 'test']);
   assert.match(a, /Bash\(npm test\)/);

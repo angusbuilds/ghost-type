@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason } from '../src/verifier.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,6 +61,25 @@ test('runAcceptance captures a failure reported on STDOUT, not just stderr (roun
   assert.match(r.stderrHead, /FAIL: expected 2/);   // stdout diagnostics are now surfaced
 });
 
+test('runAcceptance runs with a credential-stripped environment (round 6 #1)', async () => {
+  const prev = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'super-secret';
+  try {
+    // the test command "fails" (exit 1) only if it can see the key — it should NOT
+    const r = await runAcceptance(['node', '-e', 'process.exit(process.env.ANTHROPIC_API_KEY ? 1 : 0)'], process.cwd(), 20);
+    assert.equal(r.pass, true, 'acceptance env leaked ANTHROPIC_API_KEY');
+  } finally { if (prev === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prev; }
+});
+
+test('runAcceptance kills the whole process group on timeout — a grandchild cannot deadlock it (round 6 #1)', async () => {
+  const start = Date.now();
+  // parent spawns a grandchild that INHERITS stdout and never exits, then the parent hangs too.
+  const script = "const{spawn}=require('node:child_process');spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});setInterval(()=>{},1000);";
+  const r = await runAcceptance(['node', '-e', script], process.cwd(), 1);
+  assert.equal(r.timedOut, true);
+  assert.ok(Date.now() - start < 6000, 'returned promptly — the grandchild did not hold it open');
+});
+
 test('verifyCard refuses a destructive diff even when the test passes (round 5 H1)', async () => {
   const d = tmpGit();
   // the feature exists AT base...
@@ -96,4 +115,15 @@ test('suspiciousDeletion catches a net-negative diff on a build goal, ignores re
   assert.equal(suspiciousDeletion('add a lazy-load feature to the gallery', gutted), true);
   assert.equal(suspiciousDeletion('remove the dead code path', gutted), false);   // deletion IS the goal
   assert.equal(suspiciousDeletion('add a feature', ' 1 file changed, 90 insertions(+), 2 deletions(-)'), false);
+});
+
+test('destructiveDiffReason catches gutting under a non-build goal and deleted tests (round 6 #3)', () => {
+  // "fix" goal (no build word) that guts a file 500→1 — old guard missed this
+  assert.match(destructiveDiffReason('fix the parser', '1\t500\tsrc/parser.js', 'M\tsrc/parser.js'), /500 net lines|lost/);
+  // padded net-POSITIVE total (501 add / 500 del) but a test file is deleted
+  assert.match(destructiveDiffReason('make it pass', '501\t0\tpad.js\n0\t500\ttest/core.test.js', 'A\tpad.js\nD\ttest/core.test.js'), /deletes test file/);
+  // an explicit deletion goal is allowed
+  assert.equal(destructiveDiffReason('remove the dead module', '0\t400\told.js', 'D\told.js'), null);
+  // a normal additive change is clean
+  assert.equal(destructiveDiffReason('add a feature', '40\t3\tsrc/feature.js', 'A\tsrc/feature.js'), null);
 });

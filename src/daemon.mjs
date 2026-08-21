@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { STATE_DIR, WORK_DIR, readJson, writeJson, ensureState, log } from './lib.mjs';
+import { assertNoSymlinkAncestor } from './clone.mjs';
 
 export const STATE_FILE = path.join(STATE_DIR, 'state.json');
 export const HEARTBEAT_FILE = path.join(STATE_DIR, 'heartbeat');
@@ -83,9 +84,11 @@ export function reconcile({ workDir = WORK_DIR, list = safeList, activeBranches 
 // Prune clones not in `keep`. Disk-checked by the caller before each clone; this cleans up.
 export function reap({ workDir = WORK_DIR, keep = [], list = safeList, rm = (p) => fs.rmSync(p, { recursive: true, force: true }) } = {}) {
   const removed = [];
-  // A SYMLINKED work root is refused outright — canonicalizing it would just make the
-  // symlink's external target the "authorized" deletion root (Codex round 3).
-  try { if (fs.lstatSync(workDir).isSymbolicLink()) { log({ evt: 'reap-refused-symlink-root', workDir }); return removed; } } catch { /* absent → treated as empty below */ }
+  // Refuse if the work root OR ANY of its ancestors within HOME is a symlink — a symlinked
+  // `~/.ghosttype` makes WORK_DIR look like a plain dir while the recursive delete escapes to
+  // the link's external target. The reaper must share makeClone's guard (round 6 #2).
+  try { assertNoSymlinkAncestor(workDir); }
+  catch (e) { log({ evt: 'reap-refused-symlink-ancestor', workDir, why: e.message }); return removed; }
   const root = path.resolve(workDir);
   const rootSep = root + path.sep;
   for (const name of list(workDir)) {
