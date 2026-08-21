@@ -16,7 +16,7 @@ const DEFAULT_CALL_TIMEOUT_MS = 45 * 60 * 1000; // hard ceiling for one engine c
 // Codex's `token_count`) arrives at the END of the stream, so a head-only cap would discard
 // the final cost/usage on a large session and undercount the governor (round 6 #6). A session
 // under half the budget is captured whole; beyond that we keep the first and last halves.
-function capped(maxBytes = MAX_STREAM_BYTES) {
+export function capped(maxBytes = MAX_STREAM_BYTES) {
   const half = Math.max(1, Math.floor(maxBytes / 2));
   let head = '', headDone = false, tail = '';
   return {
