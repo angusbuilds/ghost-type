@@ -31,6 +31,7 @@ import { Governor } from '../src/governor.mjs';
 import { recordLineage } from '../src/lineage.mjs';
 import { selectableSessions } from '../src/sessions.mjs';
 import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
+import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
 
 const NIGHTLY_TOKEN_CAP = 2_000_000;   // conservative default; hard-enforced from minute one
 function next7am() { const d = new Date(); d.setHours(7, 0, 0, 0); if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1); return d.getTime(); }
@@ -168,6 +169,18 @@ async function main() {
     case 'haunt': { const id = rest[0]; if (!id) { console.log('usage: ghost haunt <pane-id>'); break; } haunt(id); console.log(`🟣 haunting ${id}`); break; }
     case 'unhaunt': { const id = rest[0]; if (!id) { console.log('usage: ghost unhaunt <pane-id>'); break; } unhaunt(id); console.log(`released ${id}`); break; }
     case 'haunts': { const list = readHaunted(); console.log(list.length ? 'haunting: ' + list.join(', ') : 'not haunting any panes'); break; }
+    case 'drive': {
+      const paneId = rest[0];
+      const goal = rest.slice(1).filter(a => !a.startsWith('--')).join(' ');
+      if (!paneId || !goal) { console.log('usage: ghost drive <pane-id> "<goal>"'); break; }
+      const engine = flag('--engine') === 'codex' ? 'codex' : 'claude';
+      haunt(paneId);   // tint it purple while we drive
+      console.log(`🟣 driving ${paneId} toward: ${goal}  (ctrl-c to stop)`);
+      const out = await hauntDrive({ paneId, goal, deps: defaultDriveDeps({ engine }), maxInjects: Number(flag('--max') || 20) });
+      unhaunt(paneId);
+      console.log(`\ndone: ${out.reason} · ${out.injects} prompt(s) injected`);
+      break;
+    }
     case 'off': { disarm(); console.log('👻 disarmed.'); break; }
     case 'status': {
       const st = readState();

@@ -10,8 +10,8 @@
 import { selectableSessions } from '../src/sessions.mjs';
 import { readHaunted } from '../src/haunt.mjs';
 
-const NODE = process.execPath;
-const GHOST = new URL('./ghost.mjs', import.meta.url).pathname;
+// Clicks run through the wrapper so PATH is set (node + tmux resolvable) when SwiftBar fires them.
+const WRAPPER = new URL('./ghost-swiftbar.sh', import.meta.url).pathname;
 
 const haunted = new Set(readHaunted());
 const panes = selectableSessions();
@@ -30,7 +30,7 @@ if (!panes.length) {
     const label = `${dot} ${p.target}  ${p.cmd}${p.title ? '  — ' + p.title : ''}`.replace(/\|/g, '¦');
     const action = on ? 'unhaunt' : 'haunt';
     const color = on ? 'color=#8b5cf6' : '';
-    console.log(`${label} | bash="${NODE}" param0="${GHOST}" param1="${action}" param2="${p.paneId}" terminal=false refresh=true ${color}`);
+    console.log(`${label} | bash="${WRAPPER}" param0="${action}" param1="${p.paneId}" terminal=false refresh=true ${color}`);
   }
 }
 console.log('---');
