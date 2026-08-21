@@ -17,7 +17,8 @@ import { planCards, isCodingCard } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap } from '../src/daemon.mjs';
 import { runCard } from '../src/spine.mjs';
-import { runEngine } from '../src/engine.mjs';
+import { runEngine, runAgent } from '../src/engine.mjs';
+import { shapeForEngine } from '../src/engine-rules.mjs';
 import { runAcceptance, patchApplied, classifyClaim } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
@@ -46,7 +47,11 @@ const git = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
 function realEngine(card) {
   const env = buildSessionEnv();
   const allowedTools = allowedToolsFor(card.acceptanceArgv || ['true']);
-  return ({ cwd, prompt }) => runEngine({ cwd, prompt, allowedTools, maxTurns: card.maxTurns, maxBudgetUsd: card.maxBudgetUsd, env });
+  // Dispatch by the card's engine; Codex gets the literal ordered tail, Claude the loose directive.
+  return ({ cwd, prompt }) => runAgent({
+    engine: card.engine, cwd, prompt: shapeForEngine(prompt, card.engine, card),
+    allowedTools, maxTurns: card.maxTurns, maxBudgetUsd: card.maxBudgetUsd, env,
+  });
 }
 
 function cardDeps(card, voice) {
@@ -107,9 +112,10 @@ async function main() {
         if (!dryRun && !has('--force')) process.exit(1);  // dry-run may still plan
       }
 
+      const engine = flag('--engine') === 'codex' ? 'codex' : 'claude';
       let dossiers = scanDevRoot(DEV_ROOT);
       if (project) dossiers = dossiers.filter(d => d.name === project);
-      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), maxCards: project ? 1 : 2 });
+      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), maxCards: project ? 1 : 2, engine });
       arm({ sendoff: goal, project });
       const st = readState(); st.queue = cards; writeState(st);
 

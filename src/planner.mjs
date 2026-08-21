@@ -14,7 +14,7 @@ export function branchName(project, dateStr, goal) {
 
 // unmergedByProject: { projectName: count } — projects over the backpressure threshold are
 // skipped so overnight supply can't outrun the owner's review capacity.
-export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, maxCards = 2, backpressureThreshold = 3 }) {
+export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, maxCards = 2, backpressureThreshold = 3, engine = 'claude' }) {
   const cards = [];
   const paused = [];
   for (const d of dossiers) {
@@ -25,7 +25,7 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
       cards.push(validateCard({
         project: d.name, repoPath: d.repoPath, goal,
         acceptanceArgv: d.testRunner, acceptanceTimeoutSec: 600, branch,
-        maxIterations: 6, maxTurns: 40, maxBudgetUsd: 4, situation: 'kickoff',
+        maxIterations: 6, maxTurns: 40, maxBudgetUsd: 4, situation: 'kickoff', engine,
       }));
     } else {
       // proposal-only: can't be graded unattended, so it writes a plan file, spends no
