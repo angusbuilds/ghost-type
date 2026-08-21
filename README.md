@@ -150,6 +150,7 @@ on **judgment** (did it want the right thing?), not just style.
 ## The `ghost` CLI
 
 ```bash
+ghost doctor                    # check the environment is ready to run
 ghost scan                      # list your projects + which can run unattended
 ghost learn                     # distill your prompting voice from ~/.claude transcripts
 ghost on "<goal>" [--project P] [--engine claude|codex] [--dry-run]   # arm + run tonight
@@ -161,7 +162,9 @@ ghost haunt <pane> / unhaunt <pane>     # tint a pane purple / release it
 ghost drive <pane> "<goal>"     # watch it; type the next prompt when it goes idle
 ```
 
-The native menu-bar app (`app/GhostType`) wraps this: `cd app/GhostType && swift build -c release`.
+Tunables (token cap, hard-stop hour, thresholds) live in `~/.ghosttype/config.json` —
+see [`examples/config.example.json`](examples/config.example.json). The native menu-bar app
+(`app/GhostType`) wraps all of this: `cd app/GhostType && swift build -c release`.
 
 ## Status
 
