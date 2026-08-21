@@ -30,11 +30,11 @@ import { notifyVerdict } from '../src/notify.mjs';
 import { Governor } from '../src/governor.mjs';
 import { recordLineage } from '../src/lineage.mjs';
 import { selectableSessions } from '../src/sessions.mjs';
+import { loadConfig, nightDeadlineMs } from '../src/config.mjs';
 import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
 import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
 
-const NIGHTLY_TOKEN_CAP = 2_000_000;   // conservative default; hard-enforced from minute one
-function next7am() { const d = new Date(); d.setHours(7, 0, 0, 0); if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1); return d.getTime(); }
+const CONFIG = loadConfig();   // ~/.ghosttype/config.json merged over safe defaults
 
 const HOME = os.homedir();
 const DEV_ROOT = path.join(HOME, 'dev');
@@ -139,7 +139,7 @@ async function main() {
 
       let dossiers = scanDevRoot(DEV_ROOT);
       if (project) dossiers = dossiers.filter(d => d.name === project);
-      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), maxCards: project ? 1 : 2, engine });
+      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });
 
       console.log(`\n👻 planned queue (${cards.length}):`);
       for (const c of cards) console.log(`  - [${isCodingCard(c) ? 'code' : 'proposal'}] ${c.project}: ${c.goal}`);
@@ -154,7 +154,7 @@ async function main() {
       // H9: a full lifecycle that ALWAYS reaches a terminal state — caffeinate + heartbeat
       // held for the run, orphans reconciled, and the report/disarm/notify in `finally`.
       const voice = loadVoice();
-      const gov = new Governor({ maxTokensNight: NIGHTLY_TOKEN_CAP, nightDeadlineMs: next7am(), maxConsecErrors: 3 });
+      const gov = new Governor({ maxTokensNight: CONFIG.maxTokensNight, nightDeadlineMs: nightDeadlineMs(CONFIG), maxConsecErrors: CONFIG.maxConsecErrors });
       fs.mkdirSync(REPORT_DIR, { recursive: true });
       reconcile({ activeBranches: cards.map(c => c.branch) });
       reap({ keep: cards.map(c => c.branch.replace(/[^\w.-]/g, '_')) });
@@ -218,7 +218,8 @@ async function main() {
       process.once('SIGINT', () => { cleanup(); process.exit(130); });
       console.log(`🟣 driving ${paneId} toward: ${goal}  (ctrl-c to stop)`);
       try {
-        const out = await hauntDrive({ paneId, goal, deps: defaultDriveDeps({ engine }), maxInjects });
+        const driveDeps = { ...defaultDriveDeps({ engine }), humanThreshold: CONFIG.humanIdleThreshold };
+        const out = await hauntDrive({ paneId, goal, deps: driveDeps, maxInjects, pollMs: CONFIG.pollMs, minStable: CONFIG.minStable });
         console.log(`\ndone: ${out.reason} · ${out.injects} prompt(s) injected`);
       } finally { cleanup(); }
       break;
