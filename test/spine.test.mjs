@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runCard } from '../src/spine.mjs';
+import { Governor } from '../src/governor.mjs';
 
 const card = {
   project: 'demo', repoPath: '/tmp/none', goal: 'pass the test',
@@ -27,6 +28,31 @@ test('a card that verifies on iteration 1 ships', async () => {
   assert.equal(r.outcome, 'shipped');
   assert.equal(r.mergeReady, true);
   assert.equal(r.iterations, 1);
+});
+
+test('the engine call is bounded to remaining $ AND the 45-min ceiling, not the full budget/deadline (round 7 H3)', async () => {
+  const seen = [];
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 0.3, nightDeadlineMs: NOW + 2 * 3600_000, maxConsecErrors: 9 });
+  await runCard(card, deps({
+    now: () => NOW, governor: gov,
+    runEngine: async (opts) => { seen.push(opts); return { exitCode: 0, result: { subtype: 'success', result: 'done' }, usage: {}, text: 'done' }; },
+  }));
+  assert.equal(seen[0].maxBudgetUsd, 0.3);          // min(card $1, remaining $0.3) — not the full $1
+  assert.equal(seen[0].timeoutMs, 45 * 60 * 1000);  // min(45min, 2h to deadline) — the ceiling, not 2h (the H3 bug)
+});
+
+test('the card parks without spending when too little dollar headroom remains (round 7 H3)', async () => {
+  let calls = 0;
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 0.03, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 9 });
+  const r = await runCard(card, deps({
+    now: () => NOW, governor: gov,
+    runEngine: async () => { calls += 1; return { exitCode: 0, result: { subtype: 'success', result: 'done' }, usage: {}, text: 'done' }; },
+  }));
+  assert.equal(r.outcome, 'parked');
+  assert.match(r.whyLine, /cost-budget/);
+  assert.equal(calls, 0);   // never made a call it couldn't afford (no rounding up to $0.01)
 });
 
 test('runCard reports the real dollar cost from the engine result', async () => {
