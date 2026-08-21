@@ -334,10 +334,45 @@ plain-text dump to `~/.ghosttype/log`.
 - **M3:** ghostd (launchd, pmset, heartbeat, reconciliation) + Planner + dossiers + CLI.
 - **M4:** report polish (HTML, push notification, grading feedback).
 
+## Later: haunt mode, purple terminals, and remote steering (Phase 2+)
+
+Three big directions the owner explicitly wants, scoped after the v1 spine is trusted.
+Concrete mechanisms are being finalized from a wide prior-art sweep; the shape:
+
+### Haunt mode + purple terminals
+Beyond driving its own headless sessions, Ghost Type can drive the terminal sessions
+**you left open**. You pick which terminals/panes it's allowed to haunt, and those panes
+**glow purple** while it's active — an unmistakable, ambient signal of which windows the
+ghost has its hands on. Turn a pane off and the tint clears instantly.
+- Candidate tinting mechanisms (sweep will pick the best per emulator): tmux
+  `pane-active-border-style` / `window-style` per-pane background, iTerm2 Python API tab
+  & background colors + badges, WezTerm CLI/lua per-pane colors, kitty remote control,
+  VS Code terminal theming. The purple tint is set on haunt-start, cleared on haunt-stop
+  and on the human-priority pause.
+- Injection into a live pane reuses the proven ownership discipline: stamp a pane-owner
+  marker, verify liveness + that the pane is still ours, then two-step send-keys (text,
+  short delay, Enter) — never a blind Enter. (This is exactly the `unsnooze`/`codex-bridge`
+  pattern already on this machine.)
+- The human-priority rule becomes literal here: real keyboard/mouse activity pauses all
+  typing instantly and clears the tint; the ghost never fights you for the machine.
+
+### Remote steering — "connect it like a cloud bot"
+Throw it goals and check on it from your phone, not just the terminal. You text *"work on
+sitecraft's gallery tonight"* and it arms; a morning push says *"3 shipped, review 2"* with
+a tap-through. The relay pattern is well-trodden (Omnara / Happy / VibeTunnel stream a
+local agent to a phone and relay replies back) — Ghost Type adds the part they lack: it
+**writes the prompts itself**, so remote is for *goals and approvals*, not typing every
+line. Channel options (sweep will recommend): a small always-on relay the daemon polls,
+an iMessage/`poke` bridge (already on this machine), or a minimal push service. Local Mac
+stays the executor; the phone is a steering wheel, never the engine — so transcripts,
+clones, and the no-push rule all stay on-device.
+
 ## v1 scope vs later
 
 **v1:** everything above — spine, governor, prompt writer, sampled voice, planner
 (named-project, 1–2 cards), daemon, markdown+push report.
-**Phase 2:** haunt mode (tmux injection into live sessions), Codex engine, full-corpus
-voice with clustering, Headroom quota integration, auto-arm, menu bar app.
-**Not planned:** cloud routines, multi-machine fleet.
+**Phase 2:** haunt mode + purple-terminal selection, Codex engine, full-corpus voice with
+clustering, Headroom quota integration, auto-arm, menu bar app.
+**Phase 3:** remote steering (arm + approve + report from your phone).
+**Not planned (yet):** running the agents themselves in the cloud, multi-machine fleet —
+the executor stays local by design.
