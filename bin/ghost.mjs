@@ -13,7 +13,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { WORK_DIR, STATE_DIR, CLAUDE_BIN, LOG_FILE, ensureState } from '../src/lib.mjs';
 import { scanDevRoot } from '../src/dossier.mjs';
-import { planCards, isCodingCard } from '../src/planner.mjs';
+import { planCards, isCodingCard, countUnmergedGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
 import { runCard } from '../src/spine.mjs';
@@ -66,7 +66,9 @@ function parseArgs(argv, valueFlags = [], boolFlags = []) {
   return { options, positionals };
 }
 const dateStr = () => new Date().toISOString().slice(0, 10);
-const git = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
+// stderr piped (not inherited) so a caught git failure — e.g. `--no-merged` in an empty repo
+// with no HEAD — doesn't leak "fatal:" noise to the console; it's still on the thrown error.
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
 
 function realEngine(card) {
   const env = buildSessionEnv([], process.env, card.engine);   // only this engine's creds (round 5 M9)
@@ -149,13 +151,10 @@ async function main() {
       if (project) dossiers = dossiers.filter(d => d.name === project);
       // Backpressure: count this project's still-unmerged `ghost/*` branches so overnight
       // supply can't outrun review capacity. Empty {} before meant it NEVER paused (round 4 #7).
+      // Count only branches NOT yet merged into HEAD — a ghost/* branch he's already reviewed
+      // and merged shouldn't keep consuming the backlog (round 5 M4).
       const unmergedByProject = {};
-      for (const d of dossiers) {
-        // Count only branches NOT yet merged into the repo's HEAD — a ghost/* branch he's
-        // already reviewed and merged shouldn't keep consuming the backlog (round 5 M4).
-        try { const out = git(d.repoPath, 'branch', '--no-merged', '--list', 'ghost/*').trim(); unmergedByProject[d.name] = out ? out.split('\n').filter(Boolean).length : 0; }
-        catch { /* not a git repo or no branches → 0 */ }
-      }
+      for (const d of dossiers) unmergedByProject[d.name] = countUnmergedGhostBranches(d.repoPath, git);
       const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), unmergedByProject, maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });
 
       console.log(`\n👻 planned queue (${cards.length}):`);

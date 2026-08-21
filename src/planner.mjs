@@ -47,3 +47,14 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
 }
 
 export function isCodingCard(card) { return card.kind !== 'proposal' && Array.isArray(card.acceptanceArgv) && card.acceptanceArgv.length > 0; }
+
+// Count a project's ghost/* branches NOT yet merged into HEAD — the review backlog that feeds
+// backpressure. `git` is injectable as (cwd, ...args) => stdout so this is testable against a
+// real repo. NOTE: `--list <pattern>` must come before `--no-merged` or git reads the pattern
+// as the optional commit and dies "malformed object name". Returns 0 on any error.
+export function countUnmergedGhostBranches(repoPath, git) {
+  try {
+    const out = git(repoPath, 'branch', '--list', 'ghost/*', '--no-merged').trim();
+    return out ? out.split('\n').filter(Boolean).length : 0;
+  } catch { return 0; }
+}
