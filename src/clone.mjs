@@ -10,15 +10,16 @@ export function validateClonePath(p) {
   if (!resolved.startsWith(root)) throw new Error(`clone path outside WORK_DIR: ${resolved}`);
 }
 
-// git clone --local gives an isolated clone (own .git/config + hooks), cheap because
-// the object store is hardlinked when on one filesystem; the working tree is a
-// separate checkout. First act: remove origin so push/gh/deploy have nowhere to go.
+// Fully isolated clone: --no-hardlinks copies the object store instead of hardlinking it,
+// so an agent that modifies (or chmods) a clone object can never corrupt the SOURCE repo's
+// objects (Codex H7). --local keeps it a fast filesystem copy; the clone has its own
+// .git/config + hooks. First act: remove origin so push/gh/deploy have nowhere to go.
 export function makeClone(repoPath, taskId) {
   ensureState();
   const clonePath = path.join(WORK_DIR, taskId);
   validateClonePath(clonePath);
   if (fs.existsSync(clonePath)) fs.rmSync(clonePath, { recursive: true, force: true });
-  execFileSync('git', ['clone', '--local', '--quiet', path.resolve(repoPath), clonePath]);
+  execFileSync('git', ['clone', '--local', '--no-hardlinks', '--quiet', path.resolve(repoPath), clonePath]);
   execFileSync('git', ['remote', 'remove', 'origin'], { cwd: clonePath });
   return clonePath;
 }
