@@ -28,11 +28,19 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
   vibrancy material; the menu bar shows the terminal it's driving.
 - **`ghost doctor`** — environment self-check; **config** at `~/.ghosttype/config.json`.
 
-### Safety
-- Isolated `git clone --no-hardlinks` with `origin` removed; non-Claude keys stripped;
-  token + budget + hard-stop caps metered on *every* engine call; untrusted text
-  scrubbed/fenced/shield-gated; atomic O_EXCL state writes; realpath-guarded clone/reaper.
-- **Audited by Codex** (`gpt-5.6-sol`, xhigh) across three rounds — every finding fixed.
+### Safety & governance
+- Isolated `git clone --no-hardlinks` with `origin` removed (separate inodes); non-Claude
+  keys stripped; **token, dollar, and 07:00 caps metered before every engine call**; writer
+  passes run read-only; untrusted text scrubbed/fenced/shield-gated; atomic O_EXCL+fchmod
+  state writes; realpath-guarded clone/reaper; drive never types into a shell / over you /
+  on an unknown probe; graceful Ctrl-C.
+- **Real cost tracking** (`total_cost_usd`) surfaced in the report and enforced by a hard
+  dollar cap — the direct kill-switch for the $6k-overnight-bill scenario.
+- **Observability:** `ghost logs`, `ghost doctor`, the never-silent morning report.
+- **Audited by Codex** (`gpt-5.6-sol`, xhigh) across multiple rounds — every finding fixed,
+  each round catching what the previous round's fix left partial.
 
-### Tests
-- 152 offline tests (`node --test`), zero runtime dependencies.
+### Proof
+- 156 offline unit tests (`node --test`), zero runtime dependencies.
+- Soup-to-nuts e2e on real git/fs (only the LLM scripted).
+- A live smoke shipped a real feature end-to-end with real tokens, main untouched.
