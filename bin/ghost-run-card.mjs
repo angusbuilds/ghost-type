@@ -24,7 +24,14 @@ const deps = {
   makeClone,
   headRef: (clonePath) => git(clonePath, 'rev-parse', 'HEAD').trim(),
   patchApplied,
-  runEngine: ({ cwd, prompt }) => runEngine({ cwd, prompt, allowedTools, maxTurns: card.maxTurns, maxBudgetUsd: card.maxBudgetUsd, env }),
+  // Writer calls (diagnosis/candidates/vote) run read-only, tiny-budget; coding calls get the full tool set.
+  runEngine: ({ cwd, prompt, writer }) => runEngine({
+    cwd, prompt,
+    allowedTools: writer ? 'Read' : allowedTools,
+    maxTurns: writer ? 1 : card.maxTurns,
+    maxBudgetUsd: writer ? 1 : card.maxBudgetUsd,
+    env,
+  }),
   // Commit the result onto the card's branch. The clone is fresh, so this cleanly
   // captures whatever the agent left in the working tree (or its own commit).
   commit: (clonePath, branch) => {
