@@ -206,7 +206,7 @@ async function main() {
         stopCaffeinate(caff);
         if (armed) disarm();                                // guaranteed if we armed — never skipped
         try {
-          const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: 0, tripReason };
+          const night = { date: dateStr(), cards: results, tokens: gov.tokens, costUsd: results.reduce((n, r) => n + (r.costUsd || 0), 0), tripReason };
           const md = renderReport(night);
           fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
           fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));

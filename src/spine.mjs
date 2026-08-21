@@ -34,10 +34,11 @@ export async function runCard(card, deps) {
   let rateWaits = 0;
   let falseDoneCount = 0;
   let tokensUsed = 0;
+  let costUsd = 0;
 
   // Every engine call — main, diagnosis, candidates, vote — goes through here so the
   // governor sees all of them and the token counter is honest (Codex H5).
-  const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } return r; };
+  const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } if (r?.result?.total_cost_usd) costUsd += r.result.total_cost_usd; return r; };
   const govCheck = () => { if (governor) { const c = governor.check(now()); if (!c.ok) { const e = new Error('GOVERNOR_TRIP'); e.trip = c.trip; throw e; } } };
   // Check the cap immediately before EVERY writer call — diagnosis, each candidate, and the
   // vote — not once for the whole fan-out (Codex round 3 #4).
@@ -79,21 +80,21 @@ export async function runCard(card, deps) {
 
   while (iterations < card.maxIterations) {
     // Stop before spending if the governor has tripped (token/deadline/consecutive-error).
-    if (governor) { const c = governor.check(now()); if (!c.ok) return { ...park(card, `governor: ${c.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed }; }
+    if (governor) { const c = governor.check(now()); if (!c.ok) return { ...park(card, `governor: ${c.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd }; }
     iterations += 1;
     const eng = meter(await runEngine({ cwd: clonePath, prompt, card }));
     const outcome = classifyOutcome({ exitCode: eng.exitCode, result: eng.result, text: eng.text, nowMs: now() });
 
     if (outcome.state === 'rate-limited') {
       iterations -= 1;                       // not a real attempt — don't spend the budget
-      if (++rateWaits > 6) return { ...park(card, 'rate-limited too many times', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
+      if (++rateWaits > 6) return { ...park(card, 'rate-limited too many times', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
       await sleepUntil(outcome.resetAtMs);
       continue;
     }
     if (outcome.state === 'network' || outcome.state === 'errored') {
       iterations -= 1;
       governor?.noteError();
-      if (++netBackoffs > 3) return { ...park(card, outcome.state === 'errored' ? 'engine errored repeatedly' : 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
+      if (++netBackoffs > 3) return { ...park(card, outcome.state === 'errored' ? 'engine errored repeatedly' : 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
       await sleepUntil(now() + 30_000);
       continue;
     }
@@ -105,9 +106,9 @@ export async function runCard(card, deps) {
       const claim = classifyClaim({ claimText: eng.text, verifyPass: false });
       if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, no patch' }); }
       ledger.record({ iteration: iterations, prompt, outcome: 'no-patch', exitCode: null, stderrHead: lastTestOutput, howClose: 'agent produced no changes' });
-      if (iterations >= card.maxIterations) return { ...park(card, 'no patch applied — working tree unchanged', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
+      if (iterations >= card.maxIterations) return { ...park(card, 'no patch applied — working tree unchanged', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
       try { prompt = await composeNext({ engText: eng.text, testOutput: lastTestOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'no-patch', project: card.project }); }
-      catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed }; throw e; }
+      catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed, costUsd }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd }; throw e; }
       continue;
     }
 
@@ -121,17 +122,17 @@ export async function runCard(card, deps) {
       governor?.noteOk();
       commit(clonePath, card.branch);
       recordPrompt({ iteration: iterations, prompt, outcome: 'shipped', project: card.project });
-      log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount, tokensUsed });
-      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed };
+      log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount, tokensUsed, costUsd });
+      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed, costUsd };
     }
 
     governor?.noteError();
     ledger.record({ iteration: iterations, prompt, outcome: 'fail', exitCode: 1, stderrHead: v.detail.testOutput, howClose: claim.claimedDone ? 'claimed done but tests failed' : 'tests failed' });
     if (iterations >= card.maxIterations) break;
     try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'fail', project: card.project }); }
-    catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed }; throw e; }
+    catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed, costUsd }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd }; throw e; }
   }
-  return { ...park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed };
+  return { ...park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
 }
 
 function park(card, why, iterations, testOutput, promptsWritten, patterns, falseDoneCount = 0, ledger = { rows: [] }) {
@@ -162,7 +163,7 @@ export async function runNight(cards, deps) {
     date: new Date(deps.now()).toISOString().slice(0, 10),
     cards: results,
     tokens: gov?.tokens ?? results.reduce((n, r) => n + (r.tokensUsed || 0), 0),
-    costUsd: deps.costUsd ?? 0,
+    costUsd: results.reduce((n, r) => n + (r.costUsd || 0), 0),
     tripReason,
   };
 }

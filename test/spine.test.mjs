@@ -29,6 +29,13 @@ test('a card that verifies on iteration 1 ships', async () => {
   assert.equal(r.iterations, 1);
 });
 
+test('runCard reports the real dollar cost from the engine result', async () => {
+  const r = await runCard(card, deps({
+    runEngine: async () => ({ exitCode: 0, result: { subtype: 'success', result: 'done', total_cost_usd: 0.023 }, usage: { input_tokens: 10, output_tokens: 5 }, text: 'done' }),
+  }));
+  assert.equal(r.costUsd, 0.023);
+});
+
 test('a card that never verifies parks after maxIterations', async () => {
   const r = await runCard(card, deps({ verify: async () => ({ pass: false, detail: { testOutput: 'fail' } }) }));
   assert.equal(r.outcome, 'parked');
