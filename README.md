@@ -134,20 +134,20 @@ on **judgment** (did it want the right thing?), not just style.
 ## Status & roadmap
 
 ```
-✅  Milestone 0 — the spine        clone → work → verify → commit → report   [tests green]
+✅  Milestone 0 — the spine        clone → work → verify → commit → report
 ✅  Milestone 1 — the smarter loop  claim≠fact · patch guard · diagnosis · ledger · vote
-◻️  Milestone 2 — voice builder     `ghost learn` from your real transcripts
-◻️  Milestone 3 — the daemon        launchd + caffeinate + pmset, planner, CLI
-◻️  Milestone 4 — report polish     HTML + morning push notification
+✅  Milestone 2 — voice builder     `ghost learn` from your real transcripts
+✅  Milestone 3 — the daemon        arm checks · planner · dossiers · `ghost` CLI · launchd
+✅  Milestone 4 — report polish     theme-aware HTML · push notification · prompt lineage
 
-62 tests, all offline (`node --test`)
+93 tests, all offline (`node --test`) · feature-complete
 ```
 
-**Milestone 1** makes the loop *self-diagnosing*: it never trusts a "done" claim (it
-re-runs the test itself and flags a **false-done**), fails fast on an empty patch, feeds
-the prompt-writer the **raw failure trace + a forced diagnosis**, keeps an **attempt
-ledger** so it never repeats a dead end, and **votes on 2–3 candidate prompts** before
-spending a real session.
+Ghost Type is **feature-complete**. The loop never trusts a "done" claim (re-runs the
+test itself, flags a **false-done**) and fails fast on an empty patch; **`ghost learn`**
+distills your prompting voice from your own transcripts; **`ghost scan` / `ghost on`**
+plan and drive tonight's work with battery/disk arm-checks; and the morning **HTML
+report** pushes a notification so a good — or bad — night is never silent.
 
 Spine-first on purpose: M0 proves the whole thesis on one project in one night before any
 daemon, voice, or CLI code exists. Design spec and per-milestone plans live in

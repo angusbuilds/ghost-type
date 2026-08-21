@@ -24,6 +24,8 @@ import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
 import { makeClone, fetchBranchBack } from '../src/clone.mjs';
 import { renderReport } from '../src/report.mjs';
+import { renderReportHtml } from '../src/report-html.mjs';
+import { notifyVerdict } from '../src/notify.mjs';
 
 const HOME = os.homedir();
 const DEV_ROOT = path.join(HOME, 'dev');
@@ -122,8 +124,12 @@ async function main() {
       fs.mkdirSync(REPORT_DIR, { recursive: true });
       const md = renderReport(night);
       fs.writeFileSync(path.join(REPORT_DIR, 'latest.md'), md);
+      fs.writeFileSync(path.join(REPORT_DIR, 'latest.html'), renderReportHtml(night));
       disarm();
+      notifyVerdict(night);                                 // push, never silent
+      try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
       console.log('\n' + md);
+      console.log(`\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
       break;
     }
     case 'off': { disarm(); console.log('👻 disarmed.'); break; }
