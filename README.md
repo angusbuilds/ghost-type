@@ -72,6 +72,11 @@ And a release gate: before any unattended night, a **dcg canary** fires a `claud
 session that *tries* a blocked action — if your machine's guardrails don't stop it,
 Ghost Type refuses to arm. (See [`docs/live-smoke.md`](docs/live-smoke.md).)
 
+## The site
+
+A hand-built explainer with cinematic clips (generated via Higgsfield) lives in
+[`site/`](site/) — open `site/index.html` locally to see how it works, end to end.
+
 ## Quick start
 
 > Requires Node ≥ 26 and the `claude` CLI. Zero npm dependencies.

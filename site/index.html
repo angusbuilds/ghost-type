@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost Type — your coding agents don't stop when you do</title>
+<style>
+  :root{
+    --bg:#0b0910; --bg2:#110d18; --card:#151020; --line:#241c33;
+    --ink:#f3eefb; --muted:#a99fc0; --faint:#6f6683;
+    --violet:#8b5cf6; --violet-soft:#b794f6; --glow:rgba(139,92,246,.35);
+    --ok:#4ade80;
+    --maxw:1040px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);
+    font:17px/1.6 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  a{color:inherit}
+  code,.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  /* nav */
+  nav{position:fixed;top:0;left:0;right:0;z-index:50;
+    display:flex;justify-content:space-between;align-items:center;
+    padding:16px 24px;backdrop-filter:blur(12px);
+    background:linear-gradient(to bottom,rgba(11,9,16,.85),rgba(11,9,16,0))}
+  .brand{display:flex;gap:9px;align-items:center;font-weight:600;letter-spacing:-.01em}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--violet);
+    box-shadow:0 0 14px 2px var(--glow);animation:pulse 3s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.25)}}
+  nav .ghost-btn{font-size:14px;color:var(--muted);text-decoration:none;padding:8px 14px;
+    border:1px solid var(--line);border-radius:999px;transition:.2s}
+  nav .ghost-btn:hover{color:var(--ink);border-color:var(--violet)}
+
+  /* hero */
+  .hero{position:relative;min-height:100vh;display:flex;align-items:center;overflow:hidden}
+  .hero video,.hero .heroFallback{position:absolute;inset:0;width:100%;height:100%;
+    object-fit:cover;opacity:.42;filter:saturate(1.05)}
+  .heroFallback{background:
+    radial-gradient(60% 50% at 70% 30%,rgba(139,92,246,.28),transparent 70%),
+    radial-gradient(50% 60% at 20% 80%,rgba(80,40,160,.22),transparent 70%),#0b0910}
+  .hero::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(to bottom,rgba(11,9,16,.35) 0%,rgba(11,9,16,.55) 55%,var(--bg) 100%)}
+  .hero .wrap{position:relative;z-index:2}
+  .kicker{display:inline-flex;gap:8px;align-items:center;font-size:13px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--violet-soft);margin-bottom:22px}
+  h1{font-size:clamp(38px,7vw,74px);line-height:1.02;letter-spacing:-.035em;font-weight:680;max-width:15ch}
+  h1 .em{background:linear-gradient(120deg,var(--violet-soft),var(--violet));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{margin-top:26px;font-size:clamp(18px,2.4vw,22px);color:var(--muted);max-width:56ch;line-height:1.5}
+  .cta{margin-top:38px;display:flex;gap:14px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:13px 22px;border-radius:12px;
+    font-weight:600;font-size:15px;text-decoration:none;transition:.2s}
+  .btn.primary{background:var(--violet);color:#fff;box-shadow:0 6px 30px -6px var(--glow)}
+  .btn.primary:hover{transform:translateY(-2px);box-shadow:0 12px 40px -6px var(--glow)}
+  .btn.ghost{border:1px solid var(--line);color:var(--ink)}
+  .btn.ghost:hover{border-color:var(--violet)}
+  .stat-row{margin-top:46px;display:flex;gap:34px;flex-wrap:wrap;color:var(--faint);font-size:14px}
+  .stat-row b{color:var(--ink);font-weight:600}
+
+  /* sections */
+  section{padding:110px 0;position:relative}
+  .eyebrow{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--violet-soft);margin-bottom:16px}
+  h2{font-size:clamp(28px,4.5vw,44px);letter-spacing:-.03em;line-height:1.08;font-weight:660;max-width:20ch}
+  .say{color:var(--muted);max-width:60ch;margin-top:18px;font-size:18px}
+
+  /* the gap */
+  .gap-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:44px}
+  .gap-col{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px}
+  .gap-col h3{font-size:15px;color:var(--muted);font-weight:600;margin-bottom:16px;letter-spacing:-.01em}
+  .gap-col ul{list-style:none;display:flex;flex-direction:column;gap:12px}
+  .gap-col li{padding-left:22px;position:relative;color:var(--ink);font-size:15.5px}
+  .gap-col li::before{content:"";position:absolute;left:0;top:9px;width:8px;height:8px;border-radius:2px;background:var(--faint)}
+  .gap-col .tops{color:var(--faint);font-size:14px;margin-top:16px;font-style:italic}
+  .punch{margin-top:34px;text-align:center;font-size:clamp(20px,3vw,30px);letter-spacing:-.02em;line-height:1.35}
+  .punch .em{color:var(--violet-soft)}
+
+  /* loop steps */
+  .steps{margin-top:52px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 26px;
+    display:flex;gap:18px;align-items:flex-start;opacity:0;transform:translateY(18px);transition:.6s}
+  .step.in{opacity:1;transform:none}
+  .step .n{font-family:ui-monospace,monospace;font-size:13px;color:var(--violet);
+    border:1px solid var(--line);border-radius:8px;min-width:34px;height:34px;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .step h4{font-size:17px;letter-spacing:-.01em;margin-bottom:5px}
+  .step p{color:var(--muted);font-size:14.5px;line-height:1.5}
+  .step p em{color:var(--violet-soft);font-style:normal}
+
+  /* media band */
+  .band{position:relative;margin:0;padding:0}
+  .clip{position:relative;border-radius:20px;overflow:hidden;border:1px solid var(--line);margin-top:44px;
+    box-shadow:0 30px 80px -30px #000}
+  .clip video,.clip .ph{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--bg2)}
+  .clip .ph{display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:14px;
+    background:radial-gradient(50% 60% at 50% 40%,rgba(139,92,246,.16),transparent),var(--bg2)}
+  .clip .cap{position:absolute;left:0;right:0;bottom:0;padding:22px 26px;
+    background:linear-gradient(to top,rgba(11,9,16,.9),transparent);font-size:15px;color:var(--muted)}
+  .clip .cap b{color:var(--ink)}
+
+  /* safety cards */
+  .safe{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:44px}
+  .safe .c{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px}
+  .safe .fear{color:var(--faint);font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+  .safe .guar{font-size:16px;line-height:1.5}
+  .safe .guar b{color:var(--violet-soft);font-weight:600}
+
+  /* voice */
+  .voice-quote{margin-top:40px;background:var(--card);border:1px solid var(--line);border-left:3px solid var(--violet);
+    border-radius:0 16px 16px 0;padding:28px 30px;font-size:19px;line-height:1.5}
+  .voice-quote .mono{color:var(--violet-soft);font-size:15px;display:block;margin-top:14px}
+
+  /* footer */
+  footer{padding:80px 0 90px;border-top:1px solid var(--line);text-align:center}
+  footer .big{font-size:clamp(26px,4vw,40px);letter-spacing:-.03em;font-weight:640;max-width:22ch;margin:0 auto 26px}
+  footer .meta{color:var(--faint);font-size:14px;margin-top:26px}
+  .reveal{opacity:0;transform:translateY(22px);transition:.7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  @media(max-width:760px){
+    .gap-grid,.steps,.safe{grid-template-columns:1fr}
+    section{padding:78px 0}
+    nav{padding:14px 18px}
+  }
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal,.step{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand"><span class="dot"></span> Ghost Type</div>
+  <a class="ghost-btn" href="https://github.com/hangryclaude/ghost-type">GitHub ↗</a>
+</nav>
+
+<!-- HERO -->
+<header class="hero">
+  <video autoplay muted loop playsinline poster="">
+    <source src="media/hero.mp4" type="video/mp4">
+  </video>
+  <div class="heroFallback" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="kicker"><span class="dot"></span> always-on · local · yours</div>
+    <h1>Your coding agents don't stop <span class="em">when you do.</span></h1>
+    <p class="lede">Plug in the laptop, say what to work on, and walk away. Ghost Type keeps Claude coding through the night — and when a session stops, it writes the next prompt in <em>your</em> voice, until the tests actually pass.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/hangryclaude/ghost-type">See the code →</a>
+      <a class="btn ghost" href="#how">How it works</a>
+    </div>
+    <div class="stat-row">
+      <span><b>93</b> tests, all offline</span>
+      <span><b>0</b> runtime dependencies</span>
+      <span><b>nothing</b> pushed while you sleep</span>
+    </div>
+  </div>
+</header>
+
+<!-- THE GAP -->
+<section id="gap">
+  <div class="wrap reveal">
+    <div class="eyebrow">why it doesn't exist yet</div>
+    <h2>Two problems were solved. Nobody joined them.</h2>
+    <div class="gap-grid">
+      <div class="gap-col">
+        <h3>Tools that keep an agent running</h3>
+        <ul>
+          <li>Ralph loops, Anthropic's ralph plugin</li>
+          <li>rate-limit resumers, overnight runners</li>
+        </ul>
+        <div class="tops">…but they re-send one canned string.</div>
+      </div>
+      <div class="gap-col">
+        <h3>Tools that learn from your history</h3>
+        <ul>
+          <li>chat memory, "write like me" cloners</li>
+          <li>transcript miners, style profiles</li>
+        </ul>
+        <div class="tops">…but they only clone what the agent says back.</div>
+      </div>
+    </div>
+    <p class="punch">Ghost Type is the first to write <span class="em">the next thing you'd type</span> — after 181 tools swept, still nobody else does.</p>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section id="how" class="band">
+  <div class="wrap reveal">
+    <div class="eyebrow">a night, in six moves</div>
+    <h2>You give it a goal. It does the loop.</h2>
+    <div class="steps">
+      <div class="step"><div class="n">01</div><div><h4>Clone</h4><p>A throwaway <em>local clone</em> of the repo. Its origin remote is deleted — push is impossible.</p></div></div>
+      <div class="step"><div class="n">02</div><div><h4>Work</h4><p>A fresh <em>claude</em> session in the clone, scoped tools only, your other API keys stripped out.</p></div></div>
+      <div class="step"><div class="n">03</div><div><h4>Watch</h4><p>Done, stalled, rate-limited, or offline — <em>four states</em>, never confused for one another.</p></div></div>
+      <div class="step"><div class="n">04</div><div><h4>Verify</h4><p>Ghost Type runs the test <em>itself</em>. A "done" that didn't pass is caught as a false-done.</p></div></div>
+      <div class="step"><div class="n">05</div><div><h4>Write</h4><p>The next prompt, in your voice, from the real trace. Three strikes on one bug and it parks it.</p></div></div>
+      <div class="step"><div class="n">06</div><div><h4>Report</h4><p>Reviewable branches and a morning notification — a good night, or a bad one, is never silent.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- LEAVE CLIP -->
+<section>
+  <div class="wrap reveal">
+    <div class="clip">
+      <video autoplay muted loop playsinline>
+        <source src="media/leave.mp4" type="video/mp4">
+      </video>
+      <div class="cap"><b>You leave.</b> It keeps working — in an isolated clone that can never touch your real checkout.</div>
+    </div>
+  </div>
+</section>
+
+<!-- SAFETY -->
+<section id="safe">
+  <div class="wrap reveal">
+    <div class="eyebrow">safe by construction, not by promise</div>
+    <h2>Four things that could go wrong at 3am. They can't.</h2>
+    <div class="safe">
+      <div class="c"><div class="fear">it wrecks your repo</div><div class="guar">Works in an <b>isolated clone</b> — your real working tree is never opened.</div></div>
+      <div class="c"><div class="fear">it pushes junk while you sleep</div><div class="guar">The clone's <b>origin is deleted</b>. Push has nowhere to go.</div></div>
+      <div class="c"><div class="fear">it burns your other API credits</div><div class="guar"><b>Non-Claude keys stripped</b> from the session by default.</div></div>
+      <div class="c"><div class="fear">it runs forever / a huge bill</div><div class="guar"><b>Budget cap + token cap + a hard 07:00 stop.</b></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- VOICE -->
+<section>
+  <div class="wrap reveal">
+    <div class="eyebrow">it sounds like you</div>
+    <h2>Not a generic assistant. You, at 2am.</h2>
+    <p class="say">Ghost Type learns from your own session history — how you kick things off, how you redirect after a failure, how you demand proof. The prompts it writes read like yours, and every one lands in the morning report for you to grade.</p>
+    <div class="voice-quote">
+      "the IntersectionObserver never fires in the test — mock it, or assert on the loading attribute instead"
+      <span class="mono">— a prompt Ghost Type wrote, in the owner's voice</span>
+    </div>
+  </div>
+</section>
+
+<!-- MORNING CLIP -->
+<section>
+  <div class="wrap reveal">
+    <div class="clip">
+      <video autoplay muted loop playsinline>
+        <source src="media/morning.mp4" type="video/mp4">
+      </video>
+      <div class="cap"><b>The morning after.</b> Branches to review, a report that shows the real test output, and every prompt it wrote.</div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap reveal">
+    <p class="big">Keep the work moving while you're gone.</p>
+    <a class="btn primary" href="https://github.com/hangryclaude/ghost-type">Read the source →</a>
+    <p class="meta">Feature-complete · 93 tests, all offline · zero runtime dependencies · MIT</p>
+  </div>
+</footer>
+
+<script>
+  const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}})},{threshold:.15});
+  document.querySelectorAll('.reveal,.step').forEach((el,i)=>{el.style.transitionDelay=(el.classList.contains('step')?(i%6)*60:0)+'ms';io.observe(el);});
+</script>
+</body>
+</html>
