@@ -11,7 +11,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { WORK_DIR, STATE_DIR, CLAUDE_BIN, ensureState } from '../src/lib.mjs';
+import { WORK_DIR, STATE_DIR, CLAUDE_BIN, LOG_FILE, ensureState } from '../src/lib.mjs';
 import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
@@ -264,6 +264,17 @@ async function main() {
       console.log('');
       process.exit(result.fatalFail ? 1 : 0);
     }
+    case 'logs': {
+      const n = Number(rest[0]) > 0 ? Number(rest[0]) : 20;
+      let lines = [];
+      try { lines = fs.readFileSync(LOG_FILE, 'utf8').trim().split('\n').filter(Boolean); } catch { /* none yet */ }
+      const recent = lines.slice(-n).map(l => {
+        try { const j = JSON.parse(l); return `  ${(j.t || '').slice(11, 19)}  ${(j.evt || '').padEnd(16)} ${j.project || ''}${j.why ? ' — ' + j.why : ''}${j.trip ? ' (' + j.trip + ')' : ''}`; }
+        catch { return '  ' + l; }
+      });
+      console.log(recent.length ? recent.join('\n') : 'no events logged yet.');
+      break;
+    }
     case 'off': { disarm(); console.log('👻 disarmed.'); break; }
     case 'status': {
       const st = readState();
@@ -292,7 +303,7 @@ async function main() {
       console.log('  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight');
       console.log('  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"');
       console.log('  ghost doctor                         check the environment is ready');
-      console.log('  ghost off | status | queue | report');
+      console.log('  ghost off | status | queue | report | logs [N]');
   }
 }
 
