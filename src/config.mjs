@@ -9,6 +9,7 @@ export const CONFIG_FILE = path.join(GHOST_HOME, 'config.json');
 
 export const DEFAULTS = {
   maxTokensNight: 2_000_000,   // hard nightly token ceiling
+  maxCostUsd: 10,              // hard nightly dollar ceiling
   nightDeadlineHour: 7,        // local hour the night hard-stops
   maxConsecErrors: 3,          // consecutive engine errors before the breaker trips
   humanIdleThreshold: 60,      // seconds of no input before haunt-drive may type
@@ -19,7 +20,7 @@ export const DEFAULTS = {
   defaultEngine: 'claude',
 };
 
-const NUMERIC = ['maxTokensNight', 'nightDeadlineHour', 'maxConsecErrors', 'humanIdleThreshold', 'maxCards', 'backpressureThreshold', 'pollMs', 'minStable'];
+const NUMERIC = ['maxTokensNight', 'maxCostUsd', 'nightDeadlineHour', 'maxConsecErrors', 'humanIdleThreshold', 'maxCards', 'backpressureThreshold', 'pollMs', 'minStable'];
 
 // Merge stored config over defaults, keeping only known keys and dropping bad-typed values
 // so a hand-edited file can't inject nonsense into the run.

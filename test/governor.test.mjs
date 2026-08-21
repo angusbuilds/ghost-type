@@ -12,6 +12,18 @@ test('trips on token budget', () => {
   assert.deepEqual(g.check(NOW), { ok: false, trip: 'token-budget' });
 });
 
+test('trips on the dollar budget', () => {
+  const g = new Governor({ ...caps, maxCostUsd: 5 });
+  g.addCost(3); g.addCost(2.5);
+  assert.deepEqual(g.check(NOW), { ok: false, trip: 'cost-budget' });
+});
+
+test('no dollar cap by default (Infinity) never trips on cost', () => {
+  const g = new Governor(caps);
+  g.addCost(1000);
+  assert.equal(g.check(NOW).ok, true);
+});
+
 test('trips on night deadline', () => {
   const g = new Governor(caps);
   assert.deepEqual(g.check(NOW + 3600_001), { ok: false, trip: 'night-deadline' });

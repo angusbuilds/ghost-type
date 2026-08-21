@@ -166,7 +166,7 @@ async function main() {
       // H9 + re-audit round 3: arming itself is INSIDE the try, so even a failure writing
       // the queue can't leave the state armed without reaching disarm.
       const voice = loadVoice();
-      const gov = new Governor({ maxTokensNight: CONFIG.maxTokensNight, nightDeadlineMs: nightDeadlineMs(CONFIG), maxConsecErrors: CONFIG.maxConsecErrors });
+      const gov = new Governor({ maxTokensNight: CONFIG.maxTokensNight, maxCostUsd: CONFIG.maxCostUsd, nightDeadlineMs: nightDeadlineMs(CONFIG), maxConsecErrors: CONFIG.maxConsecErrors });
       const results = [];
       let tripReason = null;
       let caff = null, hb = null, armed = false;

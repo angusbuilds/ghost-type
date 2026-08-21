@@ -38,7 +38,7 @@ export async function runCard(card, deps) {
 
   // Every engine call — main, diagnosis, candidates, vote — goes through here so the
   // governor sees all of them and the token counter is honest (Codex H5).
-  const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } if (r?.result?.total_cost_usd) costUsd += r.result.total_cost_usd; return r; };
+  const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } if (r?.result?.total_cost_usd) { costUsd += r.result.total_cost_usd; governor?.addCost(r.result.total_cost_usd); } return r; };
   const govCheck = () => { if (governor) { const c = governor.check(now()); if (!c.ok) { const e = new Error('GOVERNOR_TRIP'); e.trip = c.trip; throw e; } } };
   // Check the cap immediately before EVERY writer call — diagnosis, each candidate, and the
   // vote — not once for the whole fan-out (Codex round 3 #4).
