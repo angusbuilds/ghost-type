@@ -9,6 +9,7 @@ export const STATE_DIR = GHOST_HOME;
 export const WORK_DIR = path.join(GHOST_HOME, 'work');
 export const LOG_FILE = path.join(STATE_DIR, 'log.jsonl');
 export const CLAUDE_BIN = process.env.GHOST_CLAUDE_BIN || path.join(HOME, '.local/bin/claude');
+export const CODEX_BIN = process.env.GHOST_CODEX_BIN || path.join(HOME, '.local/bin/codex');
 
 export function ensureState() {
   fs.mkdirSync(WORK_DIR, { recursive: true });
