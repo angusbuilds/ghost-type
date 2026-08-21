@@ -28,6 +28,7 @@ import { renderReportHtml } from '../src/report-html.mjs';
 import { notifyVerdict } from '../src/notify.mjs';
 import { Governor } from '../src/governor.mjs';
 import { recordLineage } from '../src/lineage.mjs';
+import { selectableSessions } from '../src/sessions.mjs';
 
 const NIGHTLY_TOKEN_CAP = 2_000_000;   // conservative default; hard-enforced from minute one
 function next7am() { const d = new Date(); d.setHours(7, 0, 0, 0); if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1); return d.getTime(); }
@@ -146,6 +147,15 @@ async function main() {
       try { execFileSync('open', [path.join(REPORT_DIR, 'latest.html')]); } catch { /* headless */ }
       console.log('\n' + md);
       console.log(`\nreport → ${path.join(REPORT_DIR, 'latest.html')}`);
+      break;
+    }
+    case 'sessions': {
+      const list = selectableSessions();
+      if (has('--json')) { console.log(JSON.stringify(list)); break; }   // for the menu-bar picker
+      if (!list.length) { console.log('no tmux sessions found (is tmux running?)'); break; }
+      console.log('\nSelectable sessions (agents first):\n');
+      list.forEach((s, i) => console.log(`  ${String(i).padStart(2)}  ${s.target.padEnd(14)} ${s.cmd.padEnd(10)} ${s.title}`));
+      console.log('\nPick one to haunt from the menu bar, or: ghost haunt <target>\n');
       break;
     }
     case 'off': { disarm(); console.log('👻 disarmed.'); break; }
