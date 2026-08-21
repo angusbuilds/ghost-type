@@ -210,6 +210,13 @@ idle state machine is Phase 2.)
 
 ### 7. Verifier — trust nothing the agent says
 
+The claim/verify split is the single biggest correctness lever in the whole design —
+four independent projects in the sweep (Cursor Automations, Cline, CrewAI, MetaGPT)
+converged on it. The stopped session emits a *claim*, never a fact.
+
+- **Did the patch even apply?** Cheapest, earliest guard first (from gpt-engineer): if
+  the working tree is unchanged or the diff is malformed, fail immediately — don't spend
+  a whole test-run cycle discovering the agent produced nothing.
 - Runs the card's `acceptanceArgv` **itself**, in the clone, as an argv spawn. Pass =
   exit 0 within `acceptanceTimeoutSec`; timeout or nonzero = fail. The agent's "done"
   claim is never sufficient — a different instrument grades the work.
@@ -229,6 +236,21 @@ session transcript tail + `NIGHT_NOTES` + voice profile + 3–5 exemplars. Outpu
 next prompt, as Angus would type it. Implementation: one `claude -p` call (Sonnet
 default; model configurable).
 
+- **Feed it the raw trace, not a summary, and make it diagnose first.** Reflexion's
+  ablation study (borne out again by GEPA) is direct evidence: the next-prompt template
+  gets *two* fields — the raw execution trace (real stack trace, failing assertion,
+  actual diff, terminal tail) **and** a forced written diagnosis of *why* it failed —
+  before it drafts the next prompt. A compressed "test failed" loses the signal that
+  makes the next attempt better.
+- **Show the failure, don't describe it.** On a repeated error class, inject the real
+  failing artifact verbatim as a negative example paired with a passing one (PromptWizard),
+  rather than prose about the failure.
+- **Keep an attempt ledger, not just the last try.** A literal in-context table of every
+  prompt tried for this task + its outcome (pass/fail/how-close) rides along, so the
+  writer sees the *trend* across attempts (OPRO), not a single most-recent data point.
+- **Pre-flight the draft.** Cheaply generate 2–3 candidate phrasings and have a fast
+  model vote for the one likeliest to make progress (Promptimal self-consistency) before
+  a real coding session is spent on it — the vote costs a fraction of a run.
 - **Exemplar matching is tag-equality** (situation tag → most recent N exemplars),
   additionally filtered by project/domain when a domain match exists, falling back to
   situation-only. No embeddings, no new dependency.
@@ -263,10 +285,12 @@ up in-process. Any night-level cap trip → stop cleanly, write report, disarm.
 
 ### 10. Morning report
 
-Pushed, not just pulled: a macOS notification on disarm / at a set morning hour with a
-one-line verdict (*"3 shipped, 1 parked, review 2 branches"*) that deep-links the
-report. Report itself is **markdown-first in v1** (HTML wrapper added once the loop is
-trustworthy), written to `~/dev/pages/ghost-type/` and `open`ed.
+Pushed, not just pulled, and **never silent** — a notification fires on every session
+completion *either way*, success or blocked (the sweep's clearest lesson: silence on
+failure is the worst overnight outcome). A macOS notification on disarm / at a set
+morning hour carries a one-line verdict (*"3 shipped, 1 parked, review 2 branches"*) that
+deep-links the report. Report itself is **markdown-first in v1** (HTML wrapper added once
+the loop is trustworthy), written to `~/dev/pages/ghost-type/` and `open`ed.
 
 Layout respects "show, don't wall-of-prose": a **one-glance status strip first** — card
 · merge-ready? · one-line why, in columns — then collapsible per-card detail (goal,
@@ -334,6 +358,32 @@ plain-text dump to `~/.ghosttype/log`.
 - **M3:** ghostd (launchd, pmset, heartbeat, reconciliation) + Planner + dossiers + CLI.
 - **M4:** report polish (HTML, push notification, grading feedback).
 
+## Adopted from the 181-tool sweep
+
+The full ranked steal-list lives in [`STEAL-LIST.md`](../STEAL-LIST.md). The design changes
+folded in above:
+
+- **M1 (built into v1's loop):** claim-then-verify split with a patch-applied guard before
+  the test guard; raw-trace + forced-diagnosis into the Prompt Writer; show-the-failure
+  negative examples; an attempt ledger; pre-flight vote on 2–3 candidate prompts.
+- **M2 (voice):** structured multi-dimension voice profile with a blind "pick your own
+  writing" acceptance gate; extract style by diffing a generic rewrite against the real
+  prompt; passive capture via each CLI's prompt-submit hook; closed-loop scoring — did the
+  *next* session's opening message correct course or start clean?; author-*discriminable*
+  (not author-indistinguishable) as the honest target.
+- **M3 (daemon):** goal-scoped memory that survives the disposable per-task clone (lessons
+  accumulate per "the gallery", not per clone); P90 quota-burn forecasting read from the
+  local OAuth credentials against the usage API, pacing task size late in a window;
+  chronotype (learned reachable hours) as a better "is he away" signal than power state.
+- **M4 (report):** git-blame-style prompt lineage — every auto-written prompt committed
+  with a diff against the prior one for that task, tagged with its test outcome.
+- **Phase 2:** the verified per-multiplexer tint + inject primitives above; event-based
+  stop detection.
+
+Four repos are flagged **code-to-audit** before any source is copied (JankyBorders,
+MetaGPT's circuit breaker, CAMEL's retry-vs-replan, skill-extractor's outcome scoring) —
+same malware-audit rule as the first ten.
+
 ## Later: haunt mode, purple terminals, and remote steering (Phase 2+)
 
 Three big directions the owner explicitly wants, scoped after the v1 spine is trusted.
@@ -344,11 +394,27 @@ Beyond driving its own headless sessions, Ghost Type can drive the terminal sess
 **you left open**. You pick which terminals/panes it's allowed to haunt, and those panes
 **glow purple** while it's active — an unmistakable, ambient signal of which windows the
 ghost has its hands on. Turn a pane off and the tint clears instantly.
-- Candidate tinting mechanisms (sweep will pick the best per emulator): tmux
-  `pane-active-border-style` / `window-style` per-pane background, iTerm2 Python API tab
-  & background colors + badges, WezTerm CLI/lua per-pane colors, kitty remote control,
-  VS Code terminal theming. The purple tint is set on haunt-start, cleared on haunt-stop
-  and on the human-priority pause.
+- **Tinting mechanisms (verified in the 181-tool sweep; prefer native, never AppleScript
+  when a socket exists):**
+  - **tmux:** `tmux set-option -p -t <pane-id> window-active-style 'bg=colour53'` repaints
+    exactly one pane's real background (`-p` = that pane only); pair `window-style` vs
+    `window-active-style` so it auto-fades when you click in.
+  - **kitty:** one socket does both — `kitten @ set-tab-color` to tint, `send-text
+    --match id:N` to drive.
+  - **WezTerm:** `wezterm cli send-text --pane-id N` + per-pane lua color.
+  - **Zellij:** a single plugin call `set_pane_color(id, "#7C3AED")` + `write_chars_to_pane_id`.
+  - **iTerm2:** model the tint as a profile push/pop via Automatic Profile Switching keyed
+    on job name — so a crash/ctrl-c/normal-exit *all* pop the purple automatically (kills
+    the "pane stayed purple after the agent died" bug class for free).
+  - **bare Terminal.app (no socket):** resolve the pane's pid once and `CGEventPostToPid`
+    synthetic keystrokes (not System Events, which hits whatever's frontmost); hold the
+    pane as an accessibility element reference, not a title-string match.
+  - **the border:** the purple ring itself can be drawn permission-free via the same
+    SkyLight/CGS approach `JankyBorders` uses (code to audit before adapting), rather than
+    an overlay window.
+- **Detect "stopped" by event, not by polling:** tmux OSC133 `pane-command-finished`
+  (fires with exit code the instant the prompt returns, race-free) or control-mode
+  `-CC` `%output` streams — the mechanism iTerm2's own tmux integration is built on.
 - Injection into a live pane reuses the proven ownership discipline: stamp a pane-owner
   marker, verify liveness + that the pane is still ours, then two-step send-keys (text,
   short delay, Enter) — never a blind Enter. (This is exactly the `unsnooze`/`codex-bridge`
