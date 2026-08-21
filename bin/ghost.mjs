@@ -179,7 +179,15 @@ async function main() {
         caff = startCaffeinate();
         writeHeartbeat();
         hb = setInterval(() => writeHeartbeat(), 120_000);
+        // Ctrl-C stops gracefully after the current card so `finally` still disarms + reports;
+        // a second Ctrl-C hard-exits (recovered by reconcile on the next arm).
+        let interrupted = false;
+        process.on('SIGINT', () => {
+          if (interrupted) process.exit(130);
+          interrupted = true; console.log('\n⏹ interrupt — finishing this card, then stopping (Ctrl-C again to force)…');
+        });
         for (const card of cards.filter(isCodingCard)) {
+          if (interrupted) { tripReason = 'interrupted'; break; }
           const pre = gov.check(Date.now());
           if (!pre.ok) { tripReason = pre.trip; console.log(`\n⏹ stopping: ${pre.trip}`); break; }
           console.log(`\n▶ ${card.project}: ${card.goal}`);
