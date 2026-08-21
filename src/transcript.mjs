@@ -16,7 +16,11 @@ const STRIP_BLOCKS = [
   /<local-command-stdout>[\s\S]*?<\/local-command-stdout>/gi,
 ];
 
-// Return the real typed text, or null if this content is command/tool/meta noise.
+// Synthetic eval / health-check probes he pastes (they skewed voice stats by 8.4% in the
+// study): perfectly-punctuated, capitalized, and nothing like his real voice.
+const EVAL_PROBE = /reply with (exactly|only)|respond with only|CLAUDE_OK|how many (r'?s|letters)|^name a (country|word|number)|strawberry/i;
+
+// Return the real typed text, or null if this content is command/tool/meta/eval noise.
 export function cleanPromptText(s) {
   if (typeof s !== 'string') return null;
   let t = s;
@@ -26,6 +30,7 @@ export function cleanPromptText(s) {
   if (t === '[Request interrupted by user]') return null;
   if (t.startsWith('<')) return null;   // leftover wrapper we don't recognize → noise
   if (t.length < 2) return null;
+  if (EVAL_PROBE.test(t)) return null;  // synthetic eval probe, not his voice
   return t;
 }
 

@@ -25,7 +25,7 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
     fence('test-output', clean(testTail)),
     fence('night-notes', clean(notesTail)),
     fence('transcript', clean(transcriptTail)),
-    'Output ONLY the next prompt text — no preamble, no quotes. Keep it in his voice: direct, concrete, one clear instruction.',
+    'Output ONLY the next prompt text — no preamble, no quotes. Match his voice EXACTLY: all-lowercase, terse, no "!", no question, often no ending punctuation, keep his rough typos. One blunt instruction.',
   ].filter(Boolean).join('\n\n');
 
   const r = await engine({ prompt: meta });

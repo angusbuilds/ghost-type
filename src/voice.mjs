@@ -11,12 +11,33 @@ import { collectPrompts } from './transcript.mjs';
 export const VOICE_DIR = path.join(GHOST_HOME, 'voice');
 export const SITUATIONS = ['kickoff', 'continue', 'redirect-after-failure', 'demand-verification', 'unblock', 'wrap-up'];
 
+// Evidence-based default (from a 458-prompt study of his real history). Used until
+// `ghost learn` distills a richer one. This is what the prompt-writer imitates.
+export const DEFAULT_VOICE_PROFILE = [
+  'Write like Angus: all-lowercase, terse, directive.',
+  'NEVER use "!" — use CAPS or letter-stretching ("gooo") for emphasis instead.',
+  'Rarely ask questions — tell, don\'t ask. Most lines end with no terminal punctuation.',
+  'Drop apostrophes under speed ("lets", "dont", "im"). Do NOT fix typos or polish — rough is the signal.',
+  'Profanity is an intensifier ("make it fucking clean", "lock the fuck in"), never an attack.',
+  'Redirect after a failure with one blunt verdict fused straight into the next instruction ("right now its kinda shit, open it up and fix it fully") — no diagnosis paragraph.',
+  'He wants to SEE it work ("show me", "let me see"), not be told it\'s proven.',
+  'Keep it short — often under 12 words.',
+].join('\n');
+
+// Real prompts of his, as a floor of exemplars until learning runs.
+const SEED_QUOTES = [
+  'gooo', 'lets see it', 'right now its kinda shit open it up', 'make it actually super fucking clean',
+  'lets fucking lock the fuck in', 'come up with a cool domain that isnt taken', 'build everthign get it fully finish',
+  'no wait this is shit we have to work on givining you real inspo', 'make sure you dont crash my comuter tho',
+  'STOP GOOOOOO', 'Right now it\'s shit. Fix it fully', 'show me the interface', 'keep going', '100 times better',
+];
+
 // Keyword heuristic — specific situations checked before broad ones.
 const RULES = [
   ['demand-verification', /\b(verify|prove|make sure|test it|does it (actually|really)|show me|no slop|actually work)/i],
   ['redirect-after-failure', /\b(no,|actually|instead|wait|stop|that'?s wrong|revert|undo|not (what|like) that)/i],
   ['unblock', /\b(blocked|stuck|error|failing|broken|fix|why (is|isn'?t|does|are))/i],
-  ['wrap-up', /\b(commit|push|ship it|finish|wrap up|clean up|finalize)/i],
+  ['wrap-up', /\b(commit|push|ship it|finish|wrap up|clean up|finalize|give me the link|save (everything|it)|deploy)/i],
   ['kickoff', /\b(build|make|create|let'?s|start|new project|add|implement|set up)/i],
   ['continue', /\b(keep going|continue|next|carry on|go on|more|gooo|go)/i],
 ];
@@ -75,12 +96,22 @@ export async function learn({ projectsDir, engine, sampleN = 200, perTag = 5, ou
   return { totalPrompts: all.length, sampled: sample.length, profilePath, exemplarPath, bank };
 }
 
-// Load the stored voice for the Prompt Writer. Returns M0-safe defaults when unlearned.
+// The seed exemplar bank: the real quotes, tagged into situations by the classifier.
+export function seedBank() {
+  return buildExemplarBank(SEED_QUOTES.map(text => ({ text })), 6);
+}
+
+// Load the stored voice for the Prompt Writer. Falls back to the evidence-based default
+// profile + seed exemplars (never the old content-free one-liner) when unlearned.
 export function loadVoice(outDir = VOICE_DIR) {
-  let profile = 'direct, terse, verification-driven';
-  let bank = Object.fromEntries(SITUATIONS.map(s => [s, []]));
+  let profile = DEFAULT_VOICE_PROFILE;
+  let bank = seedBank();
   try { profile = fs.readFileSync(path.join(outDir, 'voice-profile.md'), 'utf8'); } catch { /* unlearned */ }
-  try { bank = JSON.parse(fs.readFileSync(path.join(outDir, 'exemplars.json'), 'utf8')); } catch { /* unlearned */ }
+  try {
+    const stored = JSON.parse(fs.readFileSync(path.join(outDir, 'exemplars.json'), 'utf8'));
+    // Stored on top, seed as the floor so thin situations still have his voice.
+    for (const s of SITUATIONS) bank[s] = [...(bank[s] || []), ...(stored[s] || [])].slice(-8);
+  } catch { /* unlearned — keep seed */ }
   return { profile, bank };
 }
 

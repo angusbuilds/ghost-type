@@ -44,7 +44,11 @@ export async function runCard(card, deps) {
     if (scan.hit) { const e = new Error('SHIELD_HIT'); e.patterns = scan.patterns; throw e; }
 
     const diagnosis = await diagnoseFailure({ goal: card.goal, rawTrace, engine: writerEngine });
+    // Voice MUST ride the primary (candidate) path, not just the fallback — otherwise the
+    // prompts the loop actually uses are voice-blind (bug caught by the prompting study).
     const context = [
+      `WRITE EXACTLY IN THIS VOICE:\n${voiceProfile}`,
+      exemplars?.length ? `HOW HE WRITES:\n- ${exemplars.join('\n- ')}` : '',
       `GOAL: ${card.goal}`,
       diagnosis ? `DIAGNOSIS OF LAST FAILURE: ${diagnosis}` : '',
       `ALREADY TRIED (do not repeat a dead end):\n${ledger.toTable()}`,
