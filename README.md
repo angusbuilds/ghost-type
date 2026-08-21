@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-44%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-62%20passing-brightgreen">
   <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A526-blue">
   <img alt="deps" src="https://img.shields.io/badge/runtime%20deps-0-blueviolet">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-black">
@@ -140,7 +140,7 @@ on **judgment** (did it want the right thing?), not just style.
 ◻️  Milestone 3 — the daemon        launchd + caffeinate + pmset, planner, CLI
 ◻️  Milestone 4 — report polish     HTML + morning push notification
 
-62 tests, all offline · CI green
+62 tests, all offline (`node --test`)
 ```
 
 **Milestone 1** makes the loop *self-diagnosing*: it never trusts a "done" claim (it
