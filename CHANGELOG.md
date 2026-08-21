@@ -72,7 +72,7 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
   aborted live injection clears stranded text with Ctrl-U (shell only).
 
 ### Proof
-- 205 offline unit tests (`node --test`), zero runtime dependencies.
+- 211 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. a committed-deletion attack.
 - A live smoke shipped a real feature end-to-end with real tokens, main untouched.
 - Independently audited by Codex (`gpt-5.6-sol`, xhigh) across five rounds — each round
