@@ -1,5 +1,5 @@
 // src/verifier.mjs
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { byteCap } from './lib.mjs';
 import { fence, scrubSecrets } from './sanitize.mjs';
 
@@ -18,6 +18,24 @@ export function runAcceptance(argv, cwd, timeoutSec) {
     });
     child.on('error', (e) => { clearTimeout(timer); resolve({ pass: false, code: null, stderrHead: String(e.message), timedOut }); });
   });
+}
+
+// Cheapest guard: did the working tree actually change vs the base commit the session
+// started from? An empty patch fails fast without spending a full acceptance-test run.
+export function patchApplied(clonePath, baseRef) {
+  const out = execFileSync('git', ['status', '--porcelain'], { cwd: clonePath }).toString().trim();
+  if (out) return true;
+  const diff = execFileSync('git', ['diff', '--stat', `${baseRef}..HEAD`], { cwd: clonePath }).toString().trim();
+  return diff.length > 0;
+}
+
+const DONE_CLAIM = /\b(all tests pass|tests pass|done|complete|finished|implemented|fixed it|works now)\b/i;
+
+// Ground the session's completion claim against the Verifier's own test result.
+// A "done" claim with a failing verify is a false-done — the highest-value catch.
+export function classifyClaim({ claimText, verifyPass }) {
+  const claimedDone = DONE_CLAIM.test(String(claimText || ''));
+  return { claimedDone, falseDone: claimedDone && !verifyPass };
 }
 
 // Cheap non-LLM cross-check: a net-negative "feature" diff is suspect (agent may

@@ -1,23 +1,65 @@
 // src/spine.mjs
 import { classifyOutcome } from './watcher.mjs';
+import { shieldScan } from './sanitize.mjs';
+import { Ledger } from './ledger.mjs';
 import { log } from './lib.mjs';
 
-// The Milestone-0 driver for ONE card. Loops: run engine → classify → on done, verify →
-// pass ships, fail feeds the prompt-writer for another try; rate-limit sleeps; network
-// backs off. Parks after maxIterations or a shield hit. deps is the test seam.
+// The card driver. Loops: run engine → classify → patch-guard → verify (grounding the
+// agent's claim) → pass ships, fail feeds a diagnosis + ledger + pre-flight-voted next
+// prompt. Rate-limit sleeps; network backs off. Parks after maxIterations or a shield hit.
+// M1 deps are all defaulted so M0 callers are unaffected.
 export async function runCard(card, deps) {
   const {
     now, makeClone, commit, gitDiff, runEngine, verify, writeNextPrompt,
     sleepUntil = async () => {}, voiceProfile = 'direct, terse, verification-driven', exemplars = [],
+    // M1 capabilities — defaulted to M0-equivalent behavior:
+    headRef = () => 'HEAD',
+    patchApplied = () => true,
+    classifyClaim = () => ({ claimedDone: false, falseDone: false }),
+    diagnoseFailure = async () => '',
+    generateCandidates = async () => [],
+    voteBest = async ({ candidates }) => ({ choice: candidates[0], index: 0 }),
   } = deps;
 
   const clonePath = makeClone(card.repoPath, card.branch.replace(/[^\w.-]/g, '_'));
+  const baseRef = headRef(clonePath);
+  const ledger = new Ledger();
   const promptsWritten = [];
   let prompt = card.goal;
   let lastTestOutput = '';
-  let lastFailure = null;
   let iterations = 0;
   let netBackoffs = 0;
+  let falseDoneCount = 0;
+
+  const writerEngine = async ({ prompt }) => runEngine({ cwd: clonePath, prompt, card, writer: true });
+
+  // Compose the next prompt: forced diagnosis from the raw trace, the full attempt
+  // ledger, then pre-flight candidate generation + a judge vote. Falls back to a single
+  // writeNextPrompt when no candidates are produced. Shield-gates untrusted inputs.
+  async function composeNext({ engText, testOutput }) {
+    const rawTrace = `${testOutput || ''}\n${engText || ''}`;
+    const scan = shieldScan(rawTrace);
+    if (scan.hit) { const e = new Error('SHIELD_HIT'); e.patterns = scan.patterns; throw e; }
+
+    const diagnosis = await diagnoseFailure({ goal: card.goal, rawTrace, engine: writerEngine });
+    const context = [
+      `GOAL: ${card.goal}`,
+      diagnosis ? `DIAGNOSIS OF LAST FAILURE: ${diagnosis}` : '',
+      `ALREADY TRIED (do not repeat a dead end):\n${ledger.toTable()}`,
+    ].filter(Boolean).join('\n\n');
+
+    const candidates = await generateCandidates({ context, n: 3, engine: writerEngine });
+    if (candidates.length > 0) {
+      const { choice } = await voteBest({ candidates, context, engine: writerEngine });
+      return choice;
+    }
+    // fallback: the M0 single-shot writer, now fed the ledger + raw trace
+    return writeNextPrompt({
+      card, diffTail: gitDiff(clonePath).excerpt, testTail: testOutput, notesTail: '',
+      transcriptTail: engText, voiceProfile, exemplars, failure: { code: 1, stderrHead: testOutput },
+      ledgerTable: ledger.toTable(), rawTrace, engine: writerEngine,
+    });
+  }
 
   while (iterations < card.maxIterations) {
     iterations += 1;
@@ -31,42 +73,46 @@ export async function runCard(card, deps) {
     }
     if (outcome.state === 'network') {
       iterations -= 1;
-      if (++netBackoffs > 3) { return park(card, 'network unreachable after retries', iterations, lastTestOutput, promptsWritten); }
+      if (++netBackoffs > 3) return park(card, 'network unreachable after retries', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger);
       await sleepUntil(now() + 30_000);
       continue;
     }
 
-    // done or stalled → try to verify what's on disk (agent claims are never trusted)
+    // PATCH-APPLIED GUARD — before spending a test cycle, confirm the tree actually changed.
+    if (!patchApplied(clonePath, baseRef)) {
+      lastTestOutput = 'no patch applied — the working tree did not change';
+      const claim = classifyClaim({ claimText: eng.text, verifyPass: false });
+      if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, no patch' }); }
+      ledger.record({ iteration: iterations, prompt, outcome: 'no-patch', exitCode: null, stderrHead: lastTestOutput, howClose: 'agent produced no changes' });
+      if (iterations >= card.maxIterations) return park(card, 'no patch applied — working tree unchanged', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger);
+      try { prompt = await composeNext({ engText: eng.text, testOutput: lastTestOutput }); promptsWritten.push(prompt); }
+      catch (e) { if (e.message === 'SHIELD_HIT') return park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger); throw e; }
+      continue;
+    }
+
+    // VERIFY — run the acceptance test ourselves; ground the agent's claim against it.
     const v = await verify(card, clonePath, { gitDiff });
     lastTestOutput = v.detail.testOutput;
+    const claim = classifyClaim({ claimText: eng.text, verifyPass: v.pass });
+    if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, tests failed' }); }
+
     if (v.pass) {
       commit(clonePath, card.branch);
-      log({ evt: 'card-shipped', project: card.project, iterations });
-      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten };
+      log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount });
+      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows };
     }
 
-    // failed verification → write the next prompt (unless out of iterations)
-    lastFailure = { code: 1, stderrHead: v.detail.testOutput };
+    ledger.record({ iteration: iterations, prompt, outcome: 'fail', exitCode: 1, stderrHead: v.detail.testOutput, howClose: claim.claimedDone ? 'claimed done but tests failed' : 'tests failed' });
     if (iterations >= card.maxIterations) break;
-    try {
-      const diff = gitDiff(clonePath);
-      prompt = await writeNextPrompt({
-        card, diffTail: diff.excerpt, testTail: v.detail.testOutput, notesTail: '',
-        transcriptTail: eng.text, voiceProfile, exemplars, failure: lastFailure,
-        engine: async ({ prompt }) => runEngine({ cwd: clonePath, prompt, card, writer: true }),
-      });
-      promptsWritten.push(prompt);
-    } catch (e) {
-      if (e.message === 'SHIELD_HIT') return park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns);
-      throw e;
-    }
+    try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); }
+    catch (e) { if (e.message === 'SHIELD_HIT') return park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger); throw e; }
   }
-  return park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten);
+  return park(card, `no pass after ${card.maxIterations} iterations`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger);
 }
 
-function park(card, why, iterations, testOutput, promptsWritten, patterns) {
-  log({ evt: 'card-parked', project: card.project, why, patterns });
-  return { project: card.project, goal: card.goal, outcome: 'parked', mergeReady: false, whyLine: why, iterations, branch: card.branch, testOutput, promptsWritten };
+function park(card, why, iterations, testOutput, promptsWritten, patterns, falseDoneCount = 0, ledger = { rows: [] }) {
+  log({ evt: 'card-parked', project: card.project, why, patterns, falseDoneCount });
+  return { project: card.project, goal: card.goal, outcome: 'parked', mergeReady: false, whyLine: why, iterations, branch: card.branch, testOutput, promptsWritten, falseDoneCount, ledger: ledger.rows };
 }
 
 export async function runNight(cards, deps) {

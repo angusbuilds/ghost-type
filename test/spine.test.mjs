@@ -49,3 +49,24 @@ test('a rate-limited engine result does not burn an iteration as a failure', asy
   }));
   assert.equal(r.outcome, 'shipped');
 });
+
+// --- M1 ---
+
+test('M1: a no-op patch fails fast without a false ship', async () => {
+  const r = await runCard({ ...card, maxIterations: 1 }, deps({
+    patchApplied: () => false,               // agent changed nothing
+    verify: async () => ({ pass: true, detail: { testOutput: 'ok' } }), // even if verify would pass
+  }));
+  assert.equal(r.outcome, 'parked');
+  assert.match(r.whyLine, /no.?patch|unchanged/i);
+});
+
+test('M1: records a false-done when the agent claims done but verify fails', async () => {
+  const r = await runCard({ ...card, maxIterations: 1 }, deps({
+    patchApplied: () => true,
+    runEngine: async () => ({ exitCode: 0, result: { subtype: 'success', result: 'all tests pass, done!' }, usage: {}, text: 'all tests pass, done!' }),
+    verify: async () => ({ pass: false, detail: { testOutput: 'AssertionError' } }),
+    classifyClaim: ({ claimText, verifyPass }) => ({ claimedDone: /done/.test(claimText), falseDone: /done/.test(claimText) && !verifyPass }),
+  }));
+  assert.ok(r.falseDoneCount >= 1);
+});

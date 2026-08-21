@@ -134,12 +134,20 @@ on **judgment** (did it want the right thing?), not just style.
 ## Status & roadmap
 
 ```
-✅  Milestone 0 — the spine        clone → work → verify → commit → report   [44 tests green]
-◻️  Milestone 1 — governor + escalation ladder + live prompt writer
+✅  Milestone 0 — the spine        clone → work → verify → commit → report   [tests green]
+✅  Milestone 1 — the smarter loop  claim≠fact · patch guard · diagnosis · ledger · vote
 ◻️  Milestone 2 — voice builder     `ghost learn` from your real transcripts
 ◻️  Milestone 3 — the daemon        launchd + caffeinate + pmset, planner, CLI
 ◻️  Milestone 4 — report polish     HTML + morning push notification
+
+62 tests, all offline · CI green
 ```
+
+**Milestone 1** makes the loop *self-diagnosing*: it never trusts a "done" claim (it
+re-runs the test itself and flags a **false-done**), fails fast on an empty patch, feeds
+the prompt-writer the **raw failure trace + a forced diagnosis**, keeps an **attempt
+ledger** so it never repeats a dead end, and **votes on 2–3 candidate prompts** before
+spending a real session.
 
 Spine-first on purpose: M0 proves the whole thesis on one project in one night before any
 daemon, voice, or CLI code exists. Design spec and per-milestone plans live in
