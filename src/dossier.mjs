@@ -8,6 +8,18 @@ import { execFileSync } from 'node:child_process';
 // Read-only git introspection; swallow stderr so no-commit repos don't spew fatals.
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024 }).toString();
 
+// Which package manager runs this repo's scripts — the declared `packageManager` field wins, then
+// the lockfile. Returning the WRONG one (always npm) meant a pnpm/yarn repo's `npm test` failed or
+// even ran a different script; and runnerAvailable then checks the RIGHT binary is installed (round 28 #12).
+export function detectPackageManager(repoPath, pkg) {
+  const declared = String(pkg.packageManager || '').split('@')[0].toLowerCase();
+  if (['pnpm', 'yarn', 'bun', 'npm'].includes(declared)) return declared;
+  if (fs.existsSync(path.join(repoPath, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (fs.existsSync(path.join(repoPath, 'yarn.lock'))) return 'yarn';
+  if (fs.existsSync(path.join(repoPath, 'bun.lockb'))) return 'bun';
+  return 'npm';   // package-lock.json or nothing → npm
+}
+
 // Detect the acceptance command as an argv array, or null if none is obvious.
 export function detectTestRunner(repoPath) {
   const has = (f) => fs.existsSync(path.join(repoPath, f));
@@ -17,7 +29,10 @@ export function detectTestRunner(repoPath) {
     let pkg = {};
     try { pkg = JSON.parse(read('package.json')); } catch { /* ignore */ }
     const t = pkg.scripts?.test;
-    if (t && !/no test specified/i.test(t)) return ['npm', 'test'];
+    if (t && !/no test specified/i.test(t)) {
+      const pm = detectPackageManager(repoPath, pkg);   // run the test SCRIPT with the declared manager
+      return pm === 'bun' ? ['bun', 'run', 'test'] : pm === 'npm' ? ['npm', 'test'] : [pm, 'test'];
+    }
     if (has('test') || has('tests')) return ['node', '--test'];
   }
   if (has('Cargo.toml')) return ['cargo', 'test'];

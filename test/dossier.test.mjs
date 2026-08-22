@@ -18,6 +18,20 @@ test('usesTransformingFilters ignores comments and a filter=lfs PATTERN token, c
   fs.rmSync(d, { recursive: true, force: true });
 });
 
+test('detectTestRunner uses the DECLARED package manager (pnpm/yarn/bun), not always npm (round 28 #12)', () => {
+  const mk = (pkg, files = {}) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-pm-'));
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify(pkg));
+    for (const [n, c] of Object.entries(files)) fs.writeFileSync(path.join(d, n), c);
+    return d;
+  };
+  const test = { scripts: { test: 'vitest run' } };
+  assert.deepEqual(detectTestRunner(mk({ ...test, packageManager: 'pnpm@11.5.0' })), ['pnpm', 'test']);   // declared field wins
+  assert.deepEqual(detectTestRunner(mk(test, { 'yarn.lock': '' })), ['yarn', 'test']);                    // lockfile fallback
+  assert.deepEqual(detectTestRunner(mk({ ...test, packageManager: 'bun@1.3.0' })), ['bun', 'run', 'test']); // bun needs `run` (bare `bun test` is its own runner)
+  assert.deepEqual(detectTestRunner(mk(test)), ['npm', 'test']);                                          // no manager → npm (unchanged)
+});
+
 test('scanRepo marks a git-LFS / check-in-filter repo unsupported, but NOT a plain text=auto repo (round 19 A2)', () => {
   const mk = (attrs) => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lfs-'));
