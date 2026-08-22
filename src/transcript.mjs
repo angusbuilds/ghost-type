@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { scrubSecrets } from './sanitize.mjs';
+import { GHOST_HOME } from './lib.mjs';
 
 const STRIP_BLOCKS = [
   /<system-reminder>[\s\S]*?<\/system-reminder>/gi,
@@ -23,7 +24,9 @@ const EVAL_PROBE = /reply with (exactly|only)|respond with only|CLAUDE_OK|how ma
 // Ghost Type's OWN generated text that lands in the transcript as a "user" row — its writer/driver
 // prompts, a compaction continuation-summary, or an injected task/system notification. None of it is
 // the owner typing, so it must not pollute the learned voice (round 28 #9).
-const GHOST_OWN = /WRITE EXACTLY IN THIS VOICE|ALREADY TRIED \(do not repeat|DIAGNOSIS OF LAST FAILURE|A coding attempt failed|^Goal set:|This session is being continued from a previous conversation|\[SYSTEM NOTIFICATION|automated background-task event|Caveat: The messages below were generated|\b(FEATURE|PROOF|SECRET)\.txt\b/i;
+// Distinctive markers Ghost Type ITSELF generates — NOT filename mentions (a bare FEATURE.txt would
+// over-filter a real human prompt about that file; round 29). These phrases are Ghost-authored.
+const GHOST_OWN = /WRITE EXACTLY IN THIS VOICE|ALREADY TRIED \(do not repeat|DIAGNOSIS OF LAST FAILURE|A coding attempt failed|^Goal set:|This session is being continued from a previous conversation|\[SYSTEM NOTIFICATION|automated background-task event|Caveat: The messages below were generated/i;
 
 // Return the real typed text, or null if this content is command/tool/meta/eval/Ghost-own noise.
 export function cleanPromptText(s) {
@@ -49,9 +52,11 @@ export function extractUserPrompts(jsonlText) {
     let j;
     try { j = JSON.parse(s); } catch { continue; }
     if (j.type !== 'user' || j.isMeta || j.isSidechain) continue;   // isSidechain = a subagent's prompt, not the human (round 28 #9)
-    // Ghost Type's OWN driving sessions run in clones under ~/.ghosttype — their "user" rows are the
-    // prompts IT generated, not the owner typing; skip them so the voice corpus stays human (round 28 #9).
-    if (String(j.cwd || '').includes('.ghosttype')) continue;
+    // Ghost Type's OWN driving sessions run in clones UNDER ~/.ghosttype — their "user" rows are the
+    // prompts IT generated, not the owner typing; skip them (round 28 #9). Match the actual root subtree,
+    // not a substring, so a human repo whose path merely contains ".ghosttype" isn't dropped (round 29).
+    const cwd = j.cwd ? path.resolve(j.cwd) : '';
+    if (cwd && (cwd === GHOST_HOME || cwd.startsWith(GHOST_HOME + path.sep))) continue;
     const m = j.message;
     if (!m || m.role !== 'user' || typeof m.content !== 'string') continue; // list content = tool result
     const clean = cleanPromptText(m.content);
