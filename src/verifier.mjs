@@ -27,7 +27,10 @@ export function sterileTree(clonePath) {
     let st;
     try { st = fs.lstatSync(path.join(clonePath, f)); } catch { return; }   // vanished between listing and hashing
     if (st.isSymbolicLink()) { indexLines.push(`120000 ${hashStdin(fs.readlinkSync(path.join(clonePath, f)))}\t${f}`); return; }
-    if (!st.isFile()) throw new Error(`refusing to snapshot special file (FIFO/socket/device/dir) at ${f}`);
+    if (st.isDirectory()) return;   // a tracked FILE replaced on disk by a DIRECTORY (a benign file→dir
+                                    // refactor, e.g. `config` → `config/default.js`): the old path is a
+                                    // deletion — omit it; the dir's files arrive via ls-files --others (round 17 a)
+    if (!st.isFile()) throw new Error(`refusing to snapshot special file (FIFO/socket/device) at ${f}`);
     const mode = (st.mode & 0o111) ? '100755' : '100644';
     if (f.includes('\n')) indexLines.push(`${mode} ${hashStdin(fs.readFileSync(path.join(clonePath, f)))}\t${f}`);   // stdin-paths is newline-delimited
     else batch.push({ f, mode });
@@ -45,6 +48,12 @@ export function sterileTree(clonePath) {
         let head = '';
         try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim(); } catch { /* uninitialized */ }
         if (head && head !== oid) throw new Error(`submodule ${f} HEAD ${head} != recorded ${oid} — refusing (its bytes aren't in the frozen tree)`);
+        // A matching HEAD is NOT enough: uncommitted edits in the submodule worktree (or non-ignored
+        // untracked files) drive the acceptance test yet can't be represented by the superproject
+        // gitlink, so shipping would silently drop them. Any dirtiness → refuse (round 17 a).
+        let dirty = '';
+        try { dirty = execFileSync('git', [...STERILE, 'status', '--porcelain'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim(); } catch { /* unreadable → leave clean, HEAD check already ran */ }
+        if (dirty) throw new Error(`submodule ${f} has uncommitted changes — refusing (its bytes aren't in the frozen tree)`);
       }
       indexLines.push(`160000 ${oid}\t${f}`);
     } else addWorktree(f);

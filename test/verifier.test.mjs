@@ -34,6 +34,40 @@ test('sterileTree preserves a submodule GITLINK (mode 160000) — a repo with a 
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+test('sterileTree REFUSES a dirty submodule (worktree changed, HEAD unchanged) — its bytes drive the test but aren\'t in the tree, so shipping would silently drop them (round 17 a)', () => {
+  const main = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-smd-'));
+  const gm = (...a) => execFileSync('git', a, { cwd: main });
+  gm('init', '-q'); gm('config', 'user.email', 't@t'); gm('config', 'user.name', 't');
+  fs.writeFileSync(path.join(main, 'a.txt'), 'hi'); gm('add', '-A'); gm('commit', '-q', '-m', 'base');
+  const sub = path.join(main, 'sub'); fs.mkdirSync(sub);
+  const gs = (...a) => execFileSync('git', a, { cwd: sub });
+  gs('init', '-q'); gs('config', 'user.email', 't@t'); gs('config', 'user.name', 't');
+  fs.writeFileSync(path.join(sub, 'x'), '1'); gs('add', '-A'); gs('commit', '-q', '-m', 'sub');
+  execFileSync('git', ['-c', 'protocol.file.allow=always', 'add', 'sub'], { cwd: main });   // gitlink
+  // a BENIGN agent edits a file INSIDE the submodule but does not commit → HEAD still equals the
+  // recorded gitlink (the HEAD-mismatch check passes), yet these bytes are what acceptance tested.
+  fs.writeFileSync(path.join(sub, 'x'), 'MODIFIED-BYTES-THE-TEST-SEES');
+  assert.throws(() => sterileTree(main), /submodule .*uncommitted changes/i);   // refuse, don't ship an empty change
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('sterileTree snapshots a file→directory refactor (tracked file replaced by a dir) instead of refusing it as a special file (round 17 a)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-f2d-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'config'), 'old=1\n'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  // benign refactor: the tracked file `config` becomes a directory `config/` — an ordinary unstaged
+  // worktree change. The old path is a deletion; its children arrive via ls-files --others.
+  fs.rmSync(path.join(d, 'config')); fs.mkdirSync(path.join(d, 'config'));
+  fs.writeFileSync(path.join(d, 'config', 'default.js'), 'export default { old: 1 };\n');
+  let tree;
+  assert.doesNotThrow(() => { tree = sterileTree(d); });                     // must NOT throw "special file (dir)"
+  const ls = execFileSync('git', ['ls-tree', '-r', tree], { cwd: d }).toString();
+  assert.match(ls, /\tconfig\/default\.js$/m);                              // the new file under the dir is captured
+  assert.doesNotMatch(ls, /blob [0-9a-f]+\tconfig$/m);                      // the old file-at-path is gone, not a conflicting blob
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('sterileTree does NOT hang on an untracked FIFO — git omits it from ls-files (round 16)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fifo-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
