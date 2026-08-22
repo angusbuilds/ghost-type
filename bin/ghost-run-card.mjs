@@ -52,10 +52,11 @@ const deps = {
     if (dirty) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', msg); }
     return git(clonePath, 'rev-parse', 'HEAD').trim();
   },
-  gitDiff: (cwd) => ({
-    stat: git(cwd, 'diff', '--shortstat', 'HEAD'),
-    excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000),
-  }),
+  gitDiff: (cwd) => {
+    // --no-ext-diff --no-textconv + fsmonitor/hooks off — a planted diff config can't execute in the daemon (round 15).
+    const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv'];
+    return { stat: git(cwd, ...D, '--shortstat', 'HEAD'), excerpt: git(cwd, ...D, 'HEAD').slice(0, 12000) };
+  },
   // Shared verifier — includes the deletion guard, so this packaged runner can't ship a
   // destructive diff on a passing test (round 5 H1); sandbox the acceptance test when configured.
   verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: CONFIG.sandbox }),

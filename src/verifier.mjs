@@ -1,9 +1,46 @@
 // src/verifier.mjs
 import { spawn, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 import { byteCap } from './lib.mjs';
 import { fence, scrubSecrets } from './sanitize.mjs';
 import { buildSessionEnv } from './env.mjs';
 import { sandboxNetDeny } from './sandbox.mjs';
+
+// STERILE snapshot of the candidate: build a tree from RAW filesystem bytes via `hash-object
+// --no-filters`, in a throwaway index, with every executable git-config path disabled. This
+// bypasses the entire check-in pipeline a malicious repo could weaponize — clean/process filters
+// (arbitrary code + byte substitution), ident/eol/encoding transforms, fsmonitor (an executable
+// hook), and index-flag tricks like assume-unchanged/skip-worktree — so the frozen tree is exactly
+// the bytes acceptance tested and `git add` can't run a planted helper (round 15). Throws on a
+// dirty submodule (its inner bytes can affect the test but aren't in the tree). Returns a tree OID.
+const STERILE = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.autocrlf=false'];
+export function sterileTree(clonePath) {
+  const run = (env, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, env, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+  // tracked + untracked, minus .gitignore'd — NUL-delimited so odd filenames are safe.
+  const files = run(process.env, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
+  const idx = path.join(clonePath, '.git', `ghost-idx-${crypto.randomBytes(6).toString('hex')}`);
+  const env = { ...process.env, GIT_INDEX_FILE: idx };
+  try {
+    for (const f of files) {
+      const abs = path.join(clonePath, f);
+      let st;
+      try { st = fs.lstatSync(abs); } catch { continue; }   // vanished between listing and hashing
+      if (st.isDirectory()) throw new Error(`dirty/embedded submodule at ${f} — refusing (its bytes aren't in the frozen tree)`);
+      let oid, mode;
+      if (st.isSymbolicLink()) {
+        mode = '120000';
+        oid = execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input: fs.readlinkSync(abs), stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+      } else {
+        mode = (st.mode & 0o111) ? '100755' : '100644';
+        oid = run(process.env, 'hash-object', '-w', '--no-filters', '--', abs).trim();   // RAW bytes, no filter
+      }
+      run(env, 'update-index', '--add', '--cacheinfo', `${mode},${oid},${f}`);
+    }
+    return run(env, 'write-tree').trim();
+  } finally { try { fs.unlinkSync(idx); } catch { /* best effort */ } }
+}
 
 // Run the card's acceptance command OURSELVES as an argv spawn (never a shell).
 // Pass = exit 0 within timeout. The agent's own "done" claim is never trusted. The command is
@@ -50,19 +87,10 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // hashes CONTENT, so any later change is visible: erasing an untracked file, corrupting content
   // in place, or committing a different tree all change the hash (round 11: the round-10 filename-
   // only check missed untracked deletion + corruption + commit-over).
-  // Disable any candidate-installed clean filter for OUR snapshot: a planted `.gitattributes` +
-  // `filter.X.clean` would otherwise (a) EXECUTE arbitrary code during `git add` with the daemon's
-  // env, outside the sandbox, and (b) store FILTERED bytes ≠ the worktree bytes acceptance tested.
-  // Overriding each `filter.*.clean` to empty makes `git add` store the raw worktree bytes (round 14).
-  const filterOverrides = [];
-  try {
-    const cfg = git(clonePath, 'config', '--get-regexp', String.raw`^filter\..*\.clean$`).trim();
-    for (const line of cfg.split('\n').filter(Boolean)) filterOverrides.push('-c', `${line.split(/\s+/)[0]}=`);
-  } catch { /* no clean filters configured */ }
-  const freeze = () => { git(clonePath, ...filterOverrides, '-c', 'core.hooksPath=/dev/null', 'add', '-A'); return git(clonePath, 'write-tree').trim(); };
-  // FAIL CLOSED: every real caller is a git clone, so a freeze failure (e.g. a stale
-  // .git/index.lock a rigged test could exploit) must refuse verification, not skip the mutation
-  // check and let an empty diff ship (round 12).
+  // Snapshot from RAW filesystem bytes so no candidate-controlled git config can execute a helper
+  // or store bytes ≠ what acceptance tested (round 14/15). FAIL CLOSED: a snapshot failure refuses
+  // verification rather than skipping the mutation check and letting an empty diff ship (round 12).
+  const freeze = () => sterileTree(clonePath);
   let treeBefore;
   try { treeBefore = freeze(); }
   catch (e) { return { pass: false, detail: { testOutput: `could not snapshot the candidate for verification — refusing: ${e.message}` } }; }
@@ -74,15 +102,17 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   if (treeBefore !== freeze()) {
     return { pass: false, detail: { testOutput: 'acceptance changed the candidate tree — refusing: a test must not rewrite or erase the patch' } };
   }
-  // Destructive-change guard on the STAGED diff, which now includes the untracked new files too
-  // (so a build goal that only adds new files isn't misread as net-negative).
-  const stat = git(clonePath, 'diff', '--cached', '--shortstat', ref, '--').trim();
+  // Destructive-change guard on the frozen tree (baseRef → treeBefore, so untracked additions
+  // count). --no-ext-diff --no-textconv so a planted `diff.external`/`textconv` can't execute in
+  // the daemon during our diff, and fsmonitor/hooks disabled (round 15).
+  const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv'];
+  const stat = git(clonePath, ...D, '--shortstat', ref, treeBefore, '--').trim();
   if (suspiciousDeletion(card.goal, stat)) {
     return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
   }
   const reason = destructiveDiffReason(card.goal,
-    git(clonePath, 'diff', '--cached', '--numstat', ref, '--').trim(),
-    git(clonePath, 'diff', '--cached', '--name-status', ref, '--').trim());
+    git(clonePath, ...D, '--numstat', ref, treeBefore, '--').trim(),
+    git(clonePath, ...D, '--name-status', ref, treeBefore, '--').trim());
   if (reason) return { pass: false, detail: { testOutput: `test passed but the change looks destructive — refusing (${reason})` } };
   // Return the frozen tree OID so the caller ships THIS exact verified tree via hook-free plumbing
   // (commit-tree), not a fresh checkout/commit that a planted post-checkout hook could mutate (round 13).

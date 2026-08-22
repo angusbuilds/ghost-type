@@ -117,20 +117,24 @@ test('commitTreeRef ships the EXACT tree with NO hooks run — a post-checkout h
   fs.rmSync(d, { recursive: true, force: true });
 });
 
-test('fetchBranchBack refuses when the landed OID != the verified commit (round 14 TOCTOU)', () => {
+test('fetchBranchBack is OID-pinned — a repointed clone branch cannot change what lands in source (round 15)', () => {
   const src = tmpRepo();
   const clone = makeClone(src, 'ft-' + process.pid);
   const g = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
-  // build a verified commit in the clone via commitTreeRef
   const base = g(clone, 'rev-parse', 'HEAD').trim();
   fs.writeFileSync(path.join(clone, 'feature.js'), 'verified');
   g(clone, 'add', '-A'); const tree = g(clone, 'write-tree').trim();
-  const oid = commitTreeRef(g, clone, 'ghost/ft', tree, base, 'ship');
-  // fetching with the CORRECT oid succeeds
-  assert.doesNotThrow(() => fetchBranchBack(src, clone, 'ghost/ft', oid));
-  // simulate tampering: repoint the clone branch to base, then fetch expecting the verified oid → refuse
-  g(clone, 'update-ref', 'refs/heads/ghost/ft2', base);
-  assert.throws(() => fetchBranchBack(src, clone, 'ghost/ft2', oid), /post-verify tampering|refusing/);
+  const oid = commitTreeRef(g, clone, 'ghost/ft', tree, base, 'ship');  // ghost/ft → the verified oid
+  // normal ship: lands exactly the verified oid
+  fetchBranchBack(src, clone, 'ghost/ship', oid);
+  assert.equal(g(src, 'rev-parse', 'refs/heads/ghost/ship').trim(), oid);
+  // TAMPER the destination branch name in the clone, but fetch by the VERIFIED oid (still reachable
+  // via ghost/ft) — the source gets the exact verified commit, NOT the tampered base tip.
+  g(clone, 'update-ref', 'refs/heads/ghost/tampered', base);
+  fetchBranchBack(src, clone, 'ghost/tampered', oid);
+  assert.equal(g(src, 'rev-parse', 'refs/heads/ghost/tampered').trim(), oid);   // verified commit, not base
+  // FAIL CLOSED: if the verified object is gone/never existed, the fetch fails (nothing ships)
+  assert.throws(() => fetchBranchBack(src, clone, 'ghost/gone', '0'.repeat(40)));
   fs.rmSync(clone, { recursive: true, force: true });
   fs.rmSync(src, { recursive: true, force: true });
 });

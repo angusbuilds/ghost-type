@@ -85,9 +85,14 @@ export function commitTreeRef(git, clonePath, branch, tree, baseRef, msg) {
 // and this fetch (an escaped background child) can't slip a different commit into the source (round 14).
 export function fetchBranchBack(repoPath, clonePath, branch, expectedOid) {
   const repo = path.resolve(repoPath);
-  execFileSync('git', ['fetch', '--quiet', path.resolve(clonePath), `${branch}:${branch}`], { cwd: repo });
+  // hooks off (no source-side reference-transaction hook), --no-tags (no tag can later mask the
+  // branch), and — when the verified OID is known — fetch that EXACT object into the fully-qualified
+  // ref, then verify refs/heads/<branch> (not the ambiguous short name a tag could shadow) (round 14/15).
+  const noHooks = ['-c', 'core.hooksPath=/dev/null'];
+  const src = expectedOid || branch;
+  execFileSync('git', [...noHooks, 'fetch', '--no-tags', '--quiet', path.resolve(clonePath), `${src}:refs/heads/${branch}`], { cwd: repo });
   if (expectedOid) {
-    const landed = execFileSync('git', ['rev-parse', branch], { cwd: repo }).toString().trim();
+    const landed = execFileSync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: repo }).toString().trim();
     if (landed !== expectedOid) throw new Error(`shipped branch ${branch} landed ${landed} != verified ${expectedOid} — refusing (post-verify tampering)`);
   }
 }

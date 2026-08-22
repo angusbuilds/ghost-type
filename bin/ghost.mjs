@@ -106,7 +106,9 @@ function cardDeps(card, voice) {
       if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', msg); }
       return git(clonePath, 'rev-parse', 'HEAD').trim();
     },
-    gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
+    // --no-ext-diff --no-textconv + fsmonitor/hooks off so a planted diff.external/textconv/fsmonitor
+    // can't execute in the daemon when we diff the clone on a failed iteration (round 15).
+    gitDiff: (cwd) => { const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv']; return { stat: git(cwd, ...D, '--shortstat', 'HEAD'), excerpt: git(cwd, ...D, 'HEAD').slice(0, 12000) }; },
     // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1);
     // acceptance runs in the OS sandbox when configured (round 8: opt-in for untrusted repos).
     verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: CONFIG.sandbox }),

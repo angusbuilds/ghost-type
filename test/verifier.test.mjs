@@ -1,7 +1,21 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree } from '../src/verifier.mjs';
+
+test('sterileTree hashes DISK bytes, defeating the assume-unchanged index trick (round 15 High)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-st-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.txt'), 'original'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  // mark a.txt assume-unchanged, then change it on disk — a plain `git add` would keep the OLD blob
+  g('update-index', '--assume-unchanged', 'a.txt');
+  fs.writeFileSync(path.join(d, 'a.txt'), 'THE-BYTES-THE-TEST-ACTUALLY-SEES');
+  const tree = sterileTree(d);
+  const blob = execFileSync('git', ['cat-file', '-p', `${tree}:a.txt`], { cwd: d }).toString();
+  assert.match(blob, /THE-BYTES-THE-TEST-ACTUALLY-SEES/);   // frozen tree = disk content, not the stale index blob
+  fs.rmSync(d, { recursive: true, force: true });
+});
 import { sandboxNetDeny, sandboxWriteConfine } from '../src/sandbox.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
