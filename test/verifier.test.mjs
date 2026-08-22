@@ -164,6 +164,20 @@ test('sterileTree REFUSES a gitlink dir with content but no .git (populated, not
   fs.rmSync(m2, { recursive: true, force: true });
 });
 
+test('sterileTree REFUSES a case-only rename done outside git (index foo.js, disk Foo.js) on a case-insensitive FS (round 23)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-case-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'foo.js'), 'export const x = 1;'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  fs.renameSync(path.join(d, 'foo.js'), path.join(d, 'Foo.js'));     // case-only rename WITHOUT git mv
+  if (fs.existsSync(path.join(d, 'foo.js'))) {                       // case-insensitive FS (macOS): foo.js resolves to Foo.js
+    assert.throws(() => sterileTree(d), /case-only rename|on-disk spelling/i);   // the index/disk mismatch is refused
+  } else {                                                          // case-sensitive FS: it's a plain delete+add, no mismatch
+    assert.doesNotThrow(() => sterileTree(d));
+  }
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('sterileTree REFUSES an untracked nested git repository — its content would otherwise be silently dropped (round 21 #1)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nested-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });

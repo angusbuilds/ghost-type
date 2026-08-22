@@ -93,9 +93,12 @@ unstaged, or untracked work runs the night against the committed baseline — th
 and the ghost's branch is based on HEAD. This is surfaced (`ghost on` prints an `uncommitted changes`
 warning, computed with forced untracked/submodule visibility so no `status` config can hide it) rather
 than refused: refusing every dirty repo would block actively-developed projects, which is the whole
-point. One residual: the planner detects the test runner from the worktree, so an *uncommitted* change
-to the test setup could plan a runner the HEAD clone lacks — that card fails acceptance and parks (it
-never ships a wrong result). The morning diff shows the branch is HEAD-based; nothing local is lost.
+point. Two residuals, both affecting only the *warning*, not correctness: the planner detects the test
+runner from the worktree, so an *uncommitted* change to the test setup could plan a runner the HEAD
+clone lacks — that card fails acceptance and parks (it never ships a wrong result); and the warning is
+computed from `git status`, which honors `assume-unchanged`/`skip-worktree`, so WIP hidden behind those
+index flags may not trigger it. Either way the clone is HEAD-based and the morning diff shows it;
+nothing local is lost.
 
 **Candidate-created ignored state:** acceptance runs in the worktree (so `.gitignore`d dependencies
 like `node_modules` are present), but the shipped tree excludes ignored files. An agent that makes a

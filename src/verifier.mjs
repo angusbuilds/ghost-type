@@ -25,11 +25,25 @@ export function sterileTree(clonePath) {
   const hashStdin = (input) => execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAXBUF }).toString().trim();
   const indexLines = [];      // "<mode> <oid>\t<path>" for update-index --index-info
   const batch = [];           // regular files hashed together in ONE git process
+  // Case-sensitive existence check (cached per directory): on a case-insensitive filesystem (macOS
+  // default) lstat/readFile resolve `foo.js` to an on-disk `Foo.js`, so a case-only rename done OUTSIDE
+  // git (`mv`, not `git mv`) leaves the index spelling while the disk entry differs — and would be dropped
+  // from the frozen tree, shipping a branch that passes on macOS but can break on a case-sensitive system.
+  const dirCache = new Map();
+  const existsExactCase = (f) => {
+    const dir = path.dirname(f), bn = path.basename(f);
+    let entries = dirCache.get(dir);
+    if (!entries) { try { entries = new Set(fs.readdirSync(path.join(clonePath, dir))); } catch { entries = new Set(); } dirCache.set(dir, entries); }
+    return entries.has(bn);
+  };
   // Add ONE worktree entry, re-hashing from DISK (defeats stale-index tricks). Rejects special
   // files (FIFO/socket/device) whose `git hash-object` would block the daemon forever (round 16).
   const addWorktree = (f) => {
     let st;
     try { st = fs.lstatSync(path.join(clonePath, f)); } catch { return; }   // vanished between listing and hashing
+    // Refuse an index/disk spelling mismatch — a case-only rename not in the frozen tree (round 23).
+    // Untracked paths come from ls-files --others as their real on-disk spelling, so they always match.
+    if (!existsExactCase(f)) throw new Error(`path ${f} differs from its on-disk spelling (case-only rename outside git?) — refusing (the rename isn't in the frozen tree)`);
     if (st.isSymbolicLink()) { indexLines.push(`120000 ${hashStdin(fs.readlinkSync(path.join(clonePath, f)))}\t${f}`); return; }
     if (st.isDirectory()) return;   // a tracked FILE replaced on disk by a DIRECTORY (a benign file→dir
                                     // refactor, e.g. `config` → `config/default.js`): the old path is a
