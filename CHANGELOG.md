@@ -113,10 +113,10 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
 - **Newline-in-filename** paths snapshot via NUL-delimited `update-index -z --index-info`.
 
 ### Proof
-- 270 offline unit tests (`node --test`), zero runtime dependencies.
+- 271 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main
   untouched, no push); the OS sandbox verified to block external writes while keeping the API up.
-- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across twenty-two rounds — each round
+- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across twenty-three rounds — each round
   verifying the prior round's fixes held and were complete, not just plausible.
