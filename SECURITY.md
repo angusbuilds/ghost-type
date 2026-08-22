@@ -63,6 +63,33 @@ Codex cards are bounded by the **token cap**, the **07:00 deadline**, and the co
 breaker — not by dollars. If you need a hard dollar ceiling on Codex spend, route it through a
 budget-enforcing proxy or keep Codex cards off dollar-critical nights.
 
+## Known limitations: repository features
+
+The integrity snapshot ships the **exact bytes in your working tree**, hashed with git's check-in
+filters DISABLED (`--no-filters`). That is deliberate — it stops a repo's own `.gitattributes`
+clean/smudge filter from executing code in the daemon during verification — but it means Ghost Type
+does **not** re-apply check-in conversions when it commits:
+
+- **Line-ending / `text=auto` repos:** committed blobs carry the worktree's line endings, not git's
+  normalized form. On macOS your files are already LF, so this is a no-op; a file that genuinely
+  contains CRLF would commit as CRLF, and git re-normalizes it when **you** merge the ghost branch.
+  Cosmetic, self-healing at merge.
+- **Git LFS:** an LFS-tracked file is committed as its real bytes, not the pointer. **LFS repos are
+  not supported** — don't point Ghost Type at one.
+- **`ident` / `working-tree-encoding` filters:** the worktree bytes are shipped verbatim.
+
+**Submodules:** clones are made without `--recurse-submodules`, so a repo whose **tests depend on
+submodule contents** fails acceptance in the clone — the card parks, it never ships a broken result.
+The snapshot also refuses a dirty, deleted, type-changed, or moved submodule rather than silently
+dropping its bytes. Full submodule materialization is not implemented; none of these are data-loss
+paths — they surface as a parked card in the morning report.
+
+Why not "check out the frozen tree and test *that*" (which would make what-is-tested exactly
+what-is-shipped)? Because the frozen tree excludes `.gitignore`d build inputs (`node_modules`,
+`.venv`), so acceptance must run in the **worktree** where those exist — testing a bare checkout
+would fail every repo whose tests need installed dependencies. Testing the worktree and shipping the
+tracked tree is the right trade for the common case; the morning diff is the gate for the rest.
+
 ## Reporting
 
 This is a personal project; open an issue on the repository for anything security-relevant.
