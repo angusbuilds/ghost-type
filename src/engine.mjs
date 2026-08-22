@@ -70,7 +70,11 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
   // for the API) — bare Edit/Write otherwise reach the whole host (round 8 Critical).
   const [cmd, ...cmdArgs] = sandboxClone ? sandboxWriteConfine([exe, ...args], sandboxClone) : [exe, ...args];
   return new Promise((resolve) => {
-    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true });
+    // IGNORE stdin — with a non-TTY stdin `codex exec` prints "Reading additional input from
+    // stdin..." and blocks forever waiting for it (every call hung until the timeout). /dev/null
+    // gives immediate EOF so the agent runs with just the prompt arg. Harmless for claude -p,
+    // which reads its prompt from the flag, not stdin (round 11).
+    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const out = capped(), err = capped();
     let settled = false;
     const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
@@ -110,7 +114,7 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
 // `agent_message` event (matching the proven codex-bridge parse on this machine).
 export function parseCodexStream(text) {
   const events = [];
-  let assistantText = '', errorMsg = '', tokens = null;
+  let assistantText = '', errorMsg = '', tokens = null, turnCompleted = false, turnFailed = false;
   for (const line of String(text).split('\n')) {
     const s = line.trim();
     if (!s) continue;
@@ -121,15 +125,17 @@ export function parseCodexStream(text) {
     // NESTED inside item.completed / turn.completed — the old top-level shape parsed nothing (round 8).
     if (ev.type === 'item.completed' && ev.item) {
       if (ev.item.type === 'agent_message' && typeof ev.item.text === 'string') assistantText = ev.item.text;   // last wins
+      // item errors are mostly benign warnings (e.g. "skill descriptions were shortened") — keep
+      // for diagnostics but DON'T treat as a turn failure; only `turn.failed` is a real failure (round 11).
       if (ev.item.type === 'error' && typeof ev.item.message === 'string') errorMsg = ev.item.message;
     }
-    if (ev.type === 'turn.completed' && ev.usage) tokens = ev.usage;
-    if (ev.type === 'turn.failed') errorMsg = ev.error?.message || 'codex turn failed';
+    if (ev.type === 'turn.completed') { turnCompleted = true; if (ev.usage) tokens = ev.usage; }
+    if (ev.type === 'turn.failed') { turnFailed = true; errorMsg = ev.error?.message || 'codex turn failed'; }
     // Legacy schema (older codex) — kept for backward compatibility.
     if (ev.type === 'agent_message' && typeof ev.text === 'string') assistantText = ev.text;
     if (ev.type === 'token_count' || ev.type === 'usage') tokens = ev;
   }
-  return { events, assistantText, errorMsg, tokens };
+  return { events, assistantText, errorMsg, tokens, turnCompleted, turnFailed };
 }
 
 // Drive Codex headless in the isolated clone. Returns the SAME shape as runEngine so the
@@ -141,7 +147,11 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
   args.push(prompt);
   const [cmd, ...cmdArgs] = sandboxClone ? sandboxWriteConfine([exe, ...args], sandboxClone) : [exe, ...args];
   return new Promise((resolve) => {
-    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true });
+    // IGNORE stdin — with a non-TTY stdin `codex exec` prints "Reading additional input from
+    // stdin..." and blocks forever waiting for it (every call hung until the timeout). /dev/null
+    // gives immediate EOF so the agent runs with just the prompt arg. Harmless for claude -p,
+    // which reads its prompt from the flag, not stdin (round 11).
+    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const out = capped(), err = capped();
     let settled = false;
     const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
@@ -160,10 +170,12 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
       // watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'. The text
       // is still returned so rate/network detection can read it (Codex round 3 #6).
       const exitCode = code == null ? 1 : code;
-      const crashed = exitCode !== 0;
+      const crashed = exitCode !== 0 || p.turnFailed;
+      // A coding turn succeeds via TOOL CALLS and often has no final agent_message, so success is
+      // exit 0 + turn.completed + no turn.failed — NOT the presence of assistant text (round 11).
       finish({
         exitCode,
-        result: crashed ? null : { subtype: p.assistantText ? 'success' : 'error', result: text },
+        result: crashed ? null : { subtype: 'success', result: text || 'codex turn completed' },
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
           output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,

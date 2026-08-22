@@ -19,6 +19,25 @@ test('parseCodexStream reads the CURRENT codex schema: item.completed text + tur
   assert.equal(p.errorMsg, 'a warning');
 });
 
+test('a coding turn with NO agent_message but turn.completed is success, not error (round 11)', () => {
+  // codex often does the work via tool calls and emits only a benign item error (skill warning)
+  // + turn.completed — success must not depend on an assistant_message being present.
+  const jsonl = [
+    JSON.stringify({ type: 'item.completed', item: { id: 'i0', type: 'error', message: 'skill descriptions were shortened' } }),
+    JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 5 } }),
+  ].join('\n');
+  const p = parseCodexStream(jsonl);
+  assert.equal(p.turnCompleted, true);
+  assert.equal(p.turnFailed, false);
+  assert.equal(p.assistantText, '');   // no agent_message — old logic would have called this 'error'
+});
+
+test('a turn.failed event marks the codex turn as failed (round 11)', () => {
+  const p = parseCodexStream(JSON.stringify({ type: 'turn.failed', error: { message: 'model refused' } }));
+  assert.equal(p.turnFailed, true);
+  assert.match(p.errorMsg, /model refused/);
+});
+
 test('parseCodexStream still reads the LEGACY top-level shape (backward compat)', () => {
   const jsonl = [
     JSON.stringify({ type: 'agent_message', text: 'legacy answer' }),
