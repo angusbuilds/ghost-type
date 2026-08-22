@@ -245,8 +245,10 @@ async function main() {
         // Proposal cards can't be graded unattended (no runner), but instead of being dropped they have
         // the agent WRITE a plan (PLAN.md on the branch) the owner reviews in the morning (round 28 #13).
         for (const c of cards.filter(c => !isCodingCard(c))) {
-          if (interrupted || !gov.check(Date.now()).ok) {
-            results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false, whyLine: 'not started — ' + (interrupted ? 'interrupted' : (gov.check(Date.now()).trip || 'stopped')), branch: c.branch, iterations: 0, promptsWritten: [], testOutput: '' });
+          const gc = gov.check(Date.now());   // check ONCE (was called twice), and record the trip so the report shows why (round 29)
+          if (interrupted || !gc.ok) {
+            if (!gc.ok && !tripReason) tripReason = gc.trip;
+            results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false, whyLine: 'not started — ' + (interrupted ? 'interrupted' : (gc.trip || 'stopped')), branch: c.branch, iterations: 0, promptsWritten: [], testOutput: '' });
             continue;
           }
           console.log(`\n📝 ${c.project}: proposing a plan for "${c.goal}"`);
