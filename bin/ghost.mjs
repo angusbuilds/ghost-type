@@ -19,7 +19,7 @@ import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, re
 import { runCardSafely } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
-import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
+import { verifyCard, patchApplied, classifyClaim, foreignIgnoredState } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
@@ -220,8 +220,18 @@ async function main() {
           if (r.mergeReady) {
             const cloneName = card.branch.replace(/[^\w.-]/g, '_');
             try { fetchBranchBack(card.repoPath, path.join(WORK_DIR, cloneName), card.branch, r.commitOid); }
-            catch (e) { console.error('⚠', e.message); r.mergeReady = false; r.whyLine = 'post-verify tampering detected — not merge-ready'; }
-            if (r.mergeReady) reapClone(cloneName);   // verified work is safely in the source repo now — reclaim the clone (round 18 #9)
+            // A fetch failure is usually a benign non-ff / ref issue, not tampering — park it with the REAL
+            // error and a correct outcome (was left 'shipped', miscounted by the report), and DON'T reap the
+            // clone: its verified work never reached the source repo, so it's the only copy (round 19 A5).
+            catch (e) { console.error('⚠', e.message); r.mergeReady = false; r.outcome = 'parked'; r.whyLine = `verified but could not fetch the branch back: ${String(e.message).split('\n')[0]}`; }
+            // Reclaim the clone now its verified work is safely in the source repo (round 18 #9) — UNLESS it
+            // holds candidate-created ignored state absent from the shipped tree, which reaping would destroy
+            // irrecoverably (round 19 A3); preserve those for the morning review instead.
+            if (r.mergeReady) {
+              const cloneAbs = path.join(WORK_DIR, cloneName);
+              if (foreignIgnoredState(cloneAbs, git)) console.log(`  ↩ preserving ${cloneName}: candidate-created ignored state not in the shipped tree`);
+              else reapClone(cloneName);
+            }
           }
           results.push(r);
           const post = gov.check(Date.now());

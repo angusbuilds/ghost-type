@@ -184,7 +184,10 @@ export async function runCardSafely(card, deps) {
     log({ evt: 'card-errored', project: card.project, why });
     return { project: card.project, goal: card.goal, outcome: 'parked', mergeReady: false,
              whyLine: `card errored and was parked: ${why}`, iterations: 0, branch: card.branch,
-             testOutput: byteCap(String(e?.stack || e?.message || e), 2000), promptsWritten: [], falseDoneCount: 0, ledger: [] };
+             testOutput: byteCap(String(e?.stack || e?.message || e), 2000), promptsWritten: [], falseDoneCount: 0, ledger: [],
+             // Any spend before the throw was already metered into the governor; keep 0 here for shape,
+             // and let runNight source the night's cost from the governor so it isn't dropped (round 19 A4).
+             tokensUsed: 0, costUsd: 0 };
   }
 }
 
@@ -212,7 +215,9 @@ export async function runNight(cards, deps) {
     date: new Date(deps.now()).toISOString().slice(0, 10),
     cards: results,
     tokens: gov?.tokens ?? results.reduce((n, r) => n + (r.tokensUsed || 0), 0),
-    costUsd: results.reduce((n, r) => n + (r.costUsd || 0), 0),
+    // Prefer the governor's metered total — a card that threw AFTER an engine call was metered would
+    // otherwise drop its cost from the per-card sum, underreporting real spend (round 19 A4).
+    costUsd: gov?.costUsd ?? results.reduce((n, r) => n + (r.costUsd || 0), 0),
     tripReason,
   };
 }

@@ -1,7 +1,7 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard, runCardSafely } from '../src/spine.mjs';
+import { runCard, runCardSafely, runNight } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
 
 const card = {
@@ -46,6 +46,20 @@ test('runCardSafely passes a NON-throwing runCard result through unchanged (roun
   assert.equal(r.outcome, 'shipped');
   assert.equal(r.mergeReady, true);
   assert.equal(r.iterations, 1);
+});
+
+test('runNight reports the GOVERNOR cost even when a card throws AFTER its engine call was metered (round 19 A4)', async () => {
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 100, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 9 });
+  const d = deps({
+    now: () => NOW,
+    runEngine: async () => ({ exitCode: 0, result: { subtype: 'success', result: 'done', total_cost_usd: 0.25 }, usage: { input_tokens: 10, output_tokens: 5 }, text: 'done' }),
+    verify: async () => { throw new Error('verify blew up AFTER the engine call was already metered'); },
+    governor: gov,
+  });
+  const night = await runNight([card], d);
+  assert.equal(night.cards[0].outcome, 'parked');    // the throw parked the card (per-card cost field is 0)...
+  assert.ok(night.costUsd >= 0.25);                  // ...but the $0.25 already metered is NOT dropped from the night total
 });
 
 test('the engine call is bounded to remaining $ AND the 45-min ceiling, not the full budget/deadline (round 7 H3)', async () => {

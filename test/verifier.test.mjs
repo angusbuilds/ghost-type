@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, foreignIgnoredState } from '../src/verifier.mjs';
 
 test('sterileTree stores a symlink as a link blob (mode 120000, content=target), not by following it (round 15)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-sl-'));
@@ -122,6 +122,34 @@ test('sterileTree refuses a dirty submodule even when status.showUntrackedFiles=
   fs.writeFileSync(path.join(sub, 'sneaky.js'), 'untracked bytes the test can see');  // ...then dirty it, untracked-only
   assert.throws(() => sterileTree(main), /uncommitted changes/i);    // --untracked-files=all forces it visible → refuse
   fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('verifyCard REFUSES an added/changed submodule gitlink — its nested commit can\'t be published, so shipping+reaping would lose it (round 19 A1)', async () => {
+  const { main, sub } = mkSubmoduleRepo('gt-glchg-');
+  const gm = (...a) => execFileSync('git', a, { cwd: main });
+  gm('commit', '-q', '-m', 'base with submodule');                    // baseRef records the ORIGINAL gitlink
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: main }).toString().trim();
+  // a BENIGN agent commits inside the submodule (moving its HEAD) and stages the new gitlink — clean, HEAD matches
+  fs.writeFileSync(path.join(sub, 'x'), '2');
+  execFileSync('git', ['add', '-A'], { cwd: sub }); execFileSync('git', ['commit', '-q', '-m', 'sub update'], { cwd: sub });
+  execFileSync('git', ['-c', 'protocol.file.allow=always', 'add', 'sub'], { cwd: main });   // stage the NEW gitlink oid
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'update the submodule', branch: 'ghost/x' }, main, { baseRef: base });
+  assert.equal(v.pass, false);
+  assert.match(v.detail.testOutput, /nested commit can't be published|added\/changed/i);
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('foreignIgnoredState: ignored dependency dirs are reapable, candidate-created ignored files are NOT (round 19 A3)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fig-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\ndata.json\n');
+  fs.writeFileSync(path.join(d, 'a.js'), '1'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  fs.mkdirSync(path.join(d, 'node_modules')); fs.writeFileSync(path.join(d, 'node_modules', 'x.js'), 'dep');
+  assert.equal(foreignIgnoredState(d), false);                       // only a dependency dir is ignored → safe to reap
+  fs.writeFileSync(path.join(d, 'data.json'), '{"agent":"wrote this, test read it"}');
+  assert.equal(foreignIgnoredState(d), true);                        // a candidate-created ignored file → preserve the clone
+  fs.rmSync(d, { recursive: true, force: true });
 });
 
 test('sterileTree does NOT hang on an untracked FIFO — git omits it from ls-files (round 16)', () => {

@@ -72,23 +72,29 @@ does **not** re-apply check-in conversions when it commits:
 
 - **Line-ending / `text=auto` repos:** committed blobs carry the worktree's line endings, not git's
   normalized form. On macOS your files are already LF, so this is a no-op; a file that genuinely
-  contains CRLF would commit as CRLF, and git re-normalizes it when **you** merge the ghost branch.
-  Cosmetic, self-healing at merge.
+  contains CRLF would commit as CRLF. Git does **not** automatically renormalize this on merge
+  (`merge.renormalize` is off by default), so a CRLF-in-worktree repo can carry noncanonical line
+  endings into the merge — cosmetic, but real. Review the morning diff.
 - **Git LFS:** an LFS-tracked file is committed as its real bytes, not the pointer. **LFS repos are
   not supported** — don't point Ghost Type at one.
-- **`ident` / `working-tree-encoding` filters:** the worktree bytes are shipped verbatim.
+- **`ident` / `working-tree-encoding` filters:** the worktree bytes are shipped verbatim, which can
+  differ from git's canonical blob. Not supported.
 
 **Submodules:** clones are made without `--recurse-submodules`, so a repo whose **tests depend on
 submodule contents** fails acceptance in the clone — the card parks, it never ships a broken result.
-The snapshot also refuses a dirty, deleted, type-changed, or moved submodule rather than silently
-dropping its bytes. Full submodule materialization is not implemented; none of these are data-loss
-paths — they surface as a parked card in the morning report.
+The snapshot refuses a dirty, deleted, type-changed, or moved submodule, and verification refuses an
+**added or content-changed gitlink** outright (its nested commit lives only in the clone and can't be
+published, so the branch would reference an unavailable object). Full submodule materialization is not
+implemented — these surface as a parked/refused card, not a silent bad ship.
 
-Why not "check out the frozen tree and test *that*" (which would make what-is-tested exactly
-what-is-shipped)? Because the frozen tree excludes `.gitignore`d build inputs (`node_modules`,
-`.venv`), so acceptance must run in the **worktree** where those exist — testing a bare checkout
-would fail every repo whose tests need installed dependencies. Testing the worktree and shipping the
-tracked tree is the right trade for the common case; the morning diff is the gate for the rest.
+**Candidate-created ignored state:** acceptance runs in the worktree (so `.gitignore`d dependencies
+like `node_modules` are present), but the shipped tree excludes ignored files. An agent that makes a
+*git-ignored* file the test then depends on can therefore produce a pass whose evidence isn't in the
+shipped tree — a false pass the morning diff is the gate for. To keep that recoverable, a completed
+clone is **not** reaped when it holds ignored state outside a recognized dependency/build directory;
+it's preserved for review instead. (Why not "check out the frozen tree and test *that*"? Because the
+frozen tree excludes those same `node_modules`/`.venv` dependencies, so a bare-checkout test would
+fail every repo whose tests need installed deps — testing the worktree is the right trade.)
 
 ## Reporting
 

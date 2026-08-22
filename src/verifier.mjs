@@ -135,6 +135,19 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   let treeBefore;
   try { treeBefore = freeze(); }
   catch (e) { return { pass: false, detail: { testOutput: `could not snapshot the candidate for verification — refusing: ${e.message}` } }; }
+  // A submodule GITLINK ADDED or CHANGED vs the base points at a nested commit that lives only in
+  // this clone's submodule object store. fetchBranchBack publishes the superproject ref but NOT that
+  // object, and the completed clone is then reaped — leaving a branch that references an unavailable
+  // commit (and, post-reap, an unrecoverable one). We can't publish nested objects, so refuse. In
+  // `git diff --raw` a changed/added gitlink is the only way a NEW mode of 160000 appears (a deletion
+  // has new mode 000000), so that alone is the signal (round 19 A1).
+  const raw = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv', '--raw', ref, treeBefore, '--').trim();
+  for (const line of raw ? raw.split('\n') : []) {
+    const m = line.match(/^:\d{6} (\d{6}) [0-9a-f]+ [0-9a-f]+ \w/);   // :<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>
+    if (m && m[1] === '160000') {
+      return { pass: false, detail: { testOutput: `refusing: submodule ${line.split('\t').slice(1).join('\t')} was added/changed — its nested commit can't be published, so the shipped branch would reference an unavailable object (round 19 A1)` } };
+    }
+  }
   // acceptanceTimeoutSec (from the governor's remaining time) caps the test so it can't run its
   // full card timeout past the nightly deadline (round 8 Medium).
   const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);
@@ -163,6 +176,26 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // Return the frozen tree OID so the caller ships THIS exact verified tree via hook-free plumbing
   // (commit-tree), not a fresh checkout/commit that a planted post-checkout hook could mutate (round 13).
   return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' }, tree: treeBefore };
+}
+
+// Standard dependency/build directories: their ignored content is regenerated from committed state
+// (npm install, a build), so it's safe to reap a completed clone that only holds these.
+const DEP_DIRS = new Set(['node_modules', '.venv', 'venv', 'env', '__pycache__', '.pytest_cache', 'target',
+  'dist', 'build', '.next', '.nuxt', 'out', 'vendor', '.gradle', '.tox', '.mypy_cache', 'coverage', '.parcel-cache', '.turbo', '.cache']);
+// Does the clone hold candidate-created ignored state OUTSIDE a recognized dependency dir? Such state
+// (e.g. a hand-written, git-ignored data file the test read) can drive a passing acceptance while being
+// ABSENT from the shipped tree — a false pass whose evidence lives only in the clone. Reaping such a clone
+// would destroy the only copy (round 19 A3). git collapses ignored dirs to one entry (e.g. "node_modules/").
+export function foreignIgnoredState(clonePath, git = gitOut) {
+  let out = '';
+  try { out = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain', '--ignored', '--untracked-files=all').toString(); }
+  catch { return true; }   // can't tell → assume foreign state exists and preserve the clone (fail safe)
+  for (const line of out.split('\n')) {
+    if (!line.startsWith('!!')) continue;                       // ignored entries are prefixed "!!"
+    const top = line.slice(3).trim().replace(/\/$/, '').split('/')[0];
+    if (top && !DEP_DIRS.has(top)) return true;                 // ignored content that isn't a known dependency dir
+  }
+  return false;
 }
 
 // Cheapest guard: did the working tree actually change vs the base commit the session
