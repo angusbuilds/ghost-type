@@ -30,11 +30,22 @@ export function sterileTree(clonePath) {
   // git (`mv`, not `git mv`) leaves the index spelling while the disk entry differs — and would be dropped
   // from the frozen tree, shipping a branch that passes on macOS but can break on a case-sensitive system.
   const dirCache = new Map();
+  const readDir = (rel) => {
+    let entries = dirCache.get(rel);
+    if (!entries) { try { entries = new Set(fs.readdirSync(path.join(clonePath, rel))); } catch { entries = new Set(); } dirCache.set(rel, entries); }
+    return entries;
+  };
+  // Verify EVERY path component's exact spelling, not just the basename — a case-only rename of a PARENT
+  // directory (`mv src Src`) resolves case-insensitively too and would otherwise slip through the leaf
+  // check and drop the directory rename from the frozen tree (round 24, completing round 23).
   const existsExactCase = (f) => {
-    const dir = path.dirname(f), bn = path.basename(f);
-    let entries = dirCache.get(dir);
-    if (!entries) { try { entries = new Set(fs.readdirSync(path.join(clonePath, dir))); } catch { entries = new Set(); } dirCache.set(dir, entries); }
-    return entries.has(bn);
+    const parts = f.split('/');
+    let rel = '';
+    for (const part of parts) {
+      if (!readDir(rel).has(part)) return false;
+      rel = rel ? `${rel}/${part}` : part;
+    }
+    return true;
   };
   // Add ONE worktree entry, re-hashing from DISK (defeats stale-index tricks). Rejects special
   // files (FIFO/socket/device) whose `git hash-object` would block the daemon forever (round 16).

@@ -178,6 +178,21 @@ test('sterileTree REFUSES a case-only rename done outside git (index foo.js, dis
   fs.rmSync(d, { recursive: true, force: true });
 });
 
+test('sterileTree REFUSES a PARENT-directory case-only rename (mv src Src), not just a leaf filename (round 24)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-casedir-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.mkdirSync(path.join(d, 'src')); fs.writeFileSync(path.join(d, 'src', 'value.mjs'), 'export const v = 1;');
+  g('add', '-A'); g('commit', '-q', '-m', 'base');
+  fs.renameSync(path.join(d, 'src'), path.join(d, 'Src'));           // case-only rename of the DIRECTORY, no git mv
+  if (fs.existsSync(path.join(d, 'src', 'value.mjs'))) {             // case-insensitive FS: src/ resolves to Src/
+    assert.throws(() => sterileTree(d), /case-only rename|on-disk spelling/i);   // parent-component mismatch is refused
+  } else {
+    assert.doesNotThrow(() => sterileTree(d));                       // case-sensitive FS: plain dir delete+add
+  }
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('sterileTree REFUSES an untracked nested git repository — its content would otherwise be silently dropped (round 21 #1)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nested-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
