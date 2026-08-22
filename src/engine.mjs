@@ -179,7 +179,10 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
     }, timeoutMs);
     child.on('close', (code) => {
       const p = parseCodexStream(out.get());
-      const text = p.assistantText || p.errorMsg || err.get();
+      // On a turn.failed, prefer the ERROR message so the failure REASON (e.g. a usage-limit phrase)
+      // reaches the watcher for rate-limit classification — even if the turn emitted some assistant
+      // text before failing, which would otherwise mask it (round 29, refining round 28 #4).
+      const text = p.turnFailed ? (p.errorMsg || err.get()) : (p.assistantText || p.errorMsg || err.get());
       // ANY nonzero exit or signal (code === null) is a transport failure → no result, so the
       // watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'. The text
       // is still returned so rate/network detection can read it (Codex round 3 #6).

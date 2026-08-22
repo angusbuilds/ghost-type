@@ -22,7 +22,10 @@ if (scenario === 'success') {
   process.stderr.write('codex: fatal error\n');
   process.exit(1);
 } else if (scenario === 'usage-limit') {
-  // a STRUCTURED provider failure — a usage limit — as turn.failed + nonzero exit (round 28 #4)
+  // a STRUCTURED provider failure — a usage limit — as turn.failed + nonzero exit (round 28 #4).
+  // Emit SOME assistant text first, then fail: the error message must still win for classification,
+  // not the assistant text (round 29 — a turn that partially replied then hit the limit).
+  line({ type: 'item.completed', item: { id: 'i0', type: 'agent_message', text: 'starting on the task...' } });
   line({ type: 'turn.failed', error: { message: "You've hit your usage limit. Try again in 30 minutes." } });
   process.exit(1);
 }
