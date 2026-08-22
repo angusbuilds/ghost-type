@@ -18,6 +18,12 @@ test('status strip lists every card before detail', () => {
   assert.ok(stripIdx > -1 && detailIdx > -1 && stripIdx < detailIdx);
 });
 
+test('renderReport never crashes on a night missing costUsd/tokens — the report must stay silent-proof (round 29)', () => {
+  const bare = { date: '2026-08-21', cards: [{ project: 'p', goal: 'g', outcome: 'skipped', mergeReady: false, whyLine: 'x', branch: 'ghost/p' }] };
+  assert.doesNotThrow(() => renderReport(bare));
+  assert.match(renderReport(bare), /\$0\.00/);   // missing costUsd renders as $0.00, not a crash
+});
+
 test('renders merge-ready verdict and actual test output', () => {
   const md = renderReport(night);
   assert.match(md, /shipped/);
