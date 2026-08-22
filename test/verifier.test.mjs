@@ -202,3 +202,40 @@ test('destructiveDiffReason closes the round-9 exemption bypasses', () => {
   // explicit test-removal intent (deletion word + test) is still allowed
   assert.equal(destructiveDiffReason('remove the flaky parser test', '0\t40\tparser.test.js', 'D\tparser.test.js'), null);
 });
+
+test('destructiveDiffReason closes the round-10 lexical gaps', () => {
+  // "repair" now counts as fix intent → not a pure deletion → 1000-line gut is caught
+  assert.match(destructiveDiffReason('repair parser and remove a debug log', '0\t1000\tsrc/parser.js', 'M\tsrc/parser.js'), /1000 net lines/);
+  // deletion + test words in DIFFERENT clauses no longer exempt a test deletion (proximity required)
+  assert.match(destructiveDiffReason('remove debug logging and fix parser tests', '0\t40\tparser.test.js', 'D\tparser.test.js'), /deletes test file/);
+});
+
+test('verifyCard refuses when the acceptance test REVERTS the candidate patch (round 10 High)', async () => {
+  const d = tmpGit();   // a.txt = "hi", committed
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  fs.writeFileSync(path.join(d, 'a.txt'), 'the real candidate change');   // the patch (modifies a tracked file)
+  // a rigged acceptance test that erases its own change back to base, then exits 0
+  const card = {
+    goal: 'add a feature',
+    acceptanceArgv: ['node', '-e', 'require("child_process").execFileSync("git",["checkout","HEAD","--","a.txt"],{cwd:process.cwd()}); process.exit(0)'],
+    acceptanceTimeoutSec: 20,
+  };
+  const v = await verifyCard(card, d, { baseRef: base });
+  assert.equal(v.pass, false);                       // test "passed" but erased the patch → refused
+  assert.match(v.detail.testOutput, /reverted the candidate/);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('verifyCard still passes when the test writes artifacts without reverting (no false reject)', async () => {
+  const d = tmpGit();
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  fs.writeFileSync(path.join(d, 'feature.js'), 'export const f = () => 1;');   // real candidate (new file)
+  const card = {
+    goal: 'add a feature',
+    acceptanceArgv: ['node', '-e', 'require("fs").writeFileSync("coverage.out","ok"); process.exit(0)'],   // writes an artifact, reverts nothing
+    acceptanceTimeoutSec: 20,
+  };
+  const v = await verifyCard(card, d, { baseRef: base });
+  assert.equal(v.pass, true);
+  fs.rmSync(d, { recursive: true, force: true });
+});
