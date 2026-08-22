@@ -14,8 +14,12 @@ const ENGINE_CREDS = {
 // engine 'none' (or any non-provider value) admits ZERO credentials — used for running an
 // untrusted acceptance test, which never needs a provider key (round 6 #1). An unknown engine
 // failing closed (no creds) is safer than defaulting to a provider's keys.
+const ALL_ENGINE_CREDS = new Set(Object.values(ENGINE_CREDS).flat());
 export function buildSessionEnv(extraAllow = [], src = process.env, engine = 'claude') {
-  const allow = new Set([...COMMON_ALLOW, ...(ENGINE_CREDS[engine] || []), ...extraAllow]);
+  // extraAllow can re-admit app vars (DATABASE_URL, …) but NEVER another engine's provider key — else
+  // a misconfigured card could leak Anthropic keys into a Codex run, breaking credential isolation (round 29).
+  const cleanExtra = extraAllow.filter(k => !ALL_ENGINE_CREDS.has(k));
+  const allow = new Set([...COMMON_ALLOW, ...(ENGINE_CREDS[engine] || []), ...cleanExtra]);
   const out = {};
   for (const [k, v] of Object.entries(src)) if (allow.has(k)) out[k] = v;
   out.GHOST_SESSION = '1';
@@ -26,13 +30,15 @@ export function buildSessionEnv(extraAllow = [], src = process.env, engine = 'cl
 // dirs (node_modules/.venv), so WITHOUT allowing install the agent can't bootstrap them and the
 // acceptance test can never pass on any deps-needing repo (round 28 #12b — the test runner alone was
 // insufficient). Scoped to install/sync verbs — never publish/deploy/exec-arbitrary.
+// Bootstrapping the clone's EXISTING deps needs only a lockfile install (no package argument), so keep
+// these to no-arg / requirements-scoped forms — a bare `install *` wildcard would widen the command
+// surface for little benefit (round 29). cargo/go/make fetch their own deps during the test run.
 const INSTALL_CMDS = {
-  npm: ['Bash(npm install)', 'Bash(npm install *)', 'Bash(npm ci)'],
-  pnpm: ['Bash(pnpm install)', 'Bash(pnpm install *)', 'Bash(pnpm i)'],
+  npm: ['Bash(npm install)', 'Bash(npm ci)'],
+  pnpm: ['Bash(pnpm install)', 'Bash(pnpm i)'],
   yarn: ['Bash(yarn install)', 'Bash(yarn)'],
   bun: ['Bash(bun install)'],
-  pytest: ['Bash(pip install *)', 'Bash(python -m pip install *)', 'Bash(uv sync)', 'Bash(uv pip install *)'],
-  // cargo/go/make fetch their own deps during the test run — no separate install command needed.
+  pytest: ['Bash(pip install -r *)', 'Bash(python -m pip install -r *)', 'Bash(uv sync)'],
 };
 
 // Build the --allowedTools value: reads/edits/writes, the exact test runner as a Bash command, the

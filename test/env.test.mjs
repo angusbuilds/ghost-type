@@ -55,10 +55,20 @@ test('allowedToolsFor lets the agent INSTALL deps for the detected manager (clon
   assert.match(allowedToolsFor(['npm', 'test']), /Bash\(npm install\)/);
   assert.match(allowedToolsFor(['pnpm', 'test']), /Bash\(pnpm install\)/);   // RPLY's manager
   assert.match(allowedToolsFor(['bun', 'run', 'test']), /Bash\(bun install\)/);
-  assert.match(allowedToolsFor(['pytest', '-q']), /Bash\(pip install \*\)/);
-  // still no publish/deploy/push escape hatch
+  assert.match(allowedToolsFor(['pytest', '-q']), /Bash\(pip install -r \*\)/);   // requirements-scoped, not bare install *
+  // still no publish/deploy/push escape hatch, and no bare `install *` wildcard (round 29)
   const p = allowedToolsFor(['pnpm', 'test']);
   assert.doesNotMatch(p, /publish|deploy|push/);
+  assert.doesNotMatch(p, /install \*\)/);   // no `pnpm install *` wildcard
   // cargo/go don't get an npm-style install (they fetch during test)
   assert.doesNotMatch(allowedToolsFor(['cargo', 'test']), /install/);
+});
+
+test('buildSessionEnv: extraAllow can add app vars but NEVER another engine\'s provider key (round 29)', () => {
+  const src = { PATH: '/b', ANTHROPIC_API_KEY: 'sk-ant', OPENAI_API_KEY: 'sk-oai', DATABASE_URL: 'postgres://x' };
+  // a Codex session that (mis)lists ANTHROPIC_API_KEY in extraAllow must still NOT receive it
+  const env = buildSessionEnv(['DATABASE_URL', 'ANTHROPIC_API_KEY'], src, 'codex');
+  assert.equal(env.DATABASE_URL, 'postgres://x');   // the app var is admitted
+  assert.equal(env.OPENAI_API_KEY, 'sk-oai');        // its OWN engine's key is admitted
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);    // the OTHER engine's key is dropped despite extraAllow
 });
