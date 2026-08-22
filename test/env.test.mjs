@@ -72,3 +72,12 @@ test('buildSessionEnv: extraAllow can add app vars but NEVER another engine\'s p
   assert.equal(env.OPENAI_API_KEY, 'sk-oai');        // its OWN engine's key is admitted
   assert.equal(env.ANTHROPIC_API_KEY, undefined);    // the OTHER engine's key is dropped despite extraAllow
 });
+
+test('ANTHROPIC_AUTH_TOKEN is a first-class Anthropic credential: kept for Claude, never leaked to Codex (round 31)', () => {
+  const src = { PATH: '/b', ANTHROPIC_AUTH_TOKEN: 'sk-ant-auth', OPENAI_API_KEY: 'sk-oai' };
+  // A Claude session authenticating via the auth-token method must actually RECEIVE it...
+  assert.equal(buildSessionEnv([], src, 'claude').ANTHROPIC_AUTH_TOKEN, 'sk-ant-auth');
+  // ...and a Codex session must NEVER get it, even when a card's extraAllow tries to smuggle it in
+  // (it was missing from the round-29 cross-engine blocklist, so extraAllow could re-admit it).
+  assert.equal(buildSessionEnv(['ANTHROPIC_AUTH_TOKEN'], src, 'codex').ANTHROPIC_AUTH_TOKEN, undefined);
+});

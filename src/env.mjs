@@ -7,7 +7,10 @@ const COMMON_ALLOW = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'TERM',
 // ONLY the selected engine's provider credentials are admitted — a Codex run must never
 // receive Anthropic keys, nor a Claude run receive OpenAI keys (round 5 M9).
 const ENGINE_CREDS = {
-  claude: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
+  // ANTHROPIC_AUTH_TOKEN is a supported Claude Code auth method — listing it both admits it to a
+  // Claude session (else auth-token users' sessions fail) AND puts it in ALL_ENGINE_CREDS so
+  // extraAllow can't smuggle it into a Codex run (round 31 fuzz found both gaps).
+  claude: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
   codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
 };
 
