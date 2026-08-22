@@ -68,7 +68,7 @@ function parseArgs(argv, valueFlags = [], boolFlags = []) {
 const dateStr = () => new Date().toISOString().slice(0, 10);
 // stderr piped (not inherited) so a caught git failure — e.g. `--no-merged` in an empty repo
 // with no HEAD — doesn't leak "fatal:" noise to the console; it's still on the thrown error.
-const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 }).toString();   // 1 MiB default ENOBUFS'd on a large diff (round 22 #5)
 
 function realEngine(card) {
   const env = buildSessionEnv([], process.env, card.engine);   // only this engine's creds (round 5 M9)

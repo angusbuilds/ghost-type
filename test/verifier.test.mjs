@@ -135,8 +135,33 @@ test('verifyCard REFUSES an added/changed submodule gitlink — its nested commi
   execFileSync('git', ['-c', 'protocol.file.allow=always', 'add', 'sub'], { cwd: main });   // stage the NEW gitlink oid
   const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'update the submodule', branch: 'ghost/x' }, main, { baseRef: base });
   assert.equal(v.pass, false);
-  assert.match(v.detail.testOutput, /nested commit can't be published|added\/changed/i);
+  assert.match(v.detail.testOutput, /modification is unsupported|submodule .* was changed/i);
   fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('verifyCard REFUSES a DELETED submodule gitlink, not just an added/changed one (round 22 #2)', async () => {
+  const { main, sub } = mkSubmoduleRepo('gt-gdel2-');
+  const gm = (...a) => execFileSync('git', a, { cwd: main });
+  gm('commit', '-q', '-m', 'base with submodule');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: main }).toString().trim();
+  fs.rmSync(sub, { recursive: true, force: true });                  // worktree removal → sterileTree omits the gitlink
+  fs.writeFileSync(path.join(main, 'a.txt'), 'changed');             // a normal change so the diff isn't empty
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'remove the submodule', branch: 'ghost/x' }, main, { baseRef: base });
+  assert.equal(v.pass, false);                                       // old mode 160000 (deletion) is now caught
+  assert.match(v.detail.testOutput, /modification is unsupported|submodule .* was changed/i);
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('sterileTree REFUSES a gitlink dir with content but no .git (populated, not initialized), keeps an EMPTY one (round 22 #1)', () => {
+  const { main, sub } = mkSubmoduleRepo('gt-guninit-');
+  fs.rmSync(path.join(sub, '.git'), { recursive: true, force: true });   // populated (still has 'x') but not initialized
+  assert.throws(() => sterileTree(main), /content but is not an initialized submodule/i);
+  fs.rmSync(main, { recursive: true, force: true });
+
+  const { main: m2, sub: s2 } = mkSubmoduleRepo('gt-gempty-');
+  fs.rmSync(path.join(s2, '.git'), { recursive: true, force: true }); fs.rmSync(path.join(s2, 'x'));   // now genuinely empty
+  assert.doesNotThrow(() => sterileTree(m2));                        // an empty uninitialized gitlink dir is faithfully kept
+  fs.rmSync(m2, { recursive: true, force: true });
 });
 
 test('sterileTree REFUSES an untracked nested git repository — its content would otherwise be silently dropped (round 21 #1)', () => {
@@ -194,7 +219,7 @@ test('verifyCard catches a changed gitlink even when diff.ignoreSubmodules=all w
   fs.writeFileSync(path.join(main, 'a.txt'), 'changed');            // ...plus a normal change so the diff isn't empty
   const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'update', branch: 'ghost/x' }, main, { baseRef: base });
   assert.equal(v.pass, false);                                      // --ignore-submodules=none overrides the config → gitlink seen → refused
-  assert.match(v.detail.testOutput, /nested commit can't be published|added\/changed/i);
+  assert.match(v.detail.testOutput, /modification is unsupported|submodule .* was changed/i);
   fs.rmSync(main, { recursive: true, force: true });
 });
 

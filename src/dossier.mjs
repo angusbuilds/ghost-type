@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 // Read-only git introspection; swallow stderr so no-commit repos don't spew fatals.
-const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024 }).toString();
 
 // Detect the acceptance command as an argv array, or null if none is obvious.
 export function detectTestRunner(repoPath) {
@@ -46,11 +46,17 @@ export function runnerAvailable(argv, { hasExe = realHasExe } = {}) {
 export function usesTransformingFilters(repoPath) {
   if (fs.existsSync(path.join(repoPath, '.lfsconfig'))) return true;
   try {
-    // Skip comment lines so a note like `# filter=lfs disabled` isn't read as an active filter and
-    // wrongly refuses the repo (round 21 #8). This is only a fast pre-filter; the verify-time
-    // git check-attr guard is authoritative and catches nested/config/candidate-added attributes.
-    return fs.readFileSync(path.join(repoPath, '.gitattributes'), 'utf8').split('\n')
-      .some(l => !l.trim().startsWith('#') && /(^|\s)filter=|working-tree-encoding=/i.test(l));
+    for (const line of fs.readFileSync(path.join(repoPath, '.gitattributes'), 'utf8').split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;                 // skip blanks + comments (round 21 #8)
+      // A .gitattributes line is `pattern attr1 attr2 ...`. The FIRST token is the pathname pattern —
+      // parse only the ATTRIBUTE tokens after it, so a file literally named `filter=lfs` (a valid
+      // pattern) isn't mistaken for an active filter (round 22 #6). Only a fast pre-filter; the
+      // verify-time git check-attr guard is authoritative for nested/config/candidate-added attrs.
+      const attrs = t.split(/\s+/).slice(1);
+      if (attrs.some(a => /^filter=/i.test(a) || /^working-tree-encoding=/i.test(a) || /^ident$/i.test(a))) return true;
+    }
+    return false;
   } catch { return false; }
 }
 
@@ -61,7 +67,9 @@ export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}
   let branch = '', lastCommit = '', dirty = false, hasHead = false;
   try { branch = gitRunner(repoPath, 'rev-parse', '--abbrev-ref', 'HEAD').trim(); } catch { /* not a repo */ }
   try { lastCommit = gitRunner(repoPath, 'log', '-1', '--format=%h %s').trim(); } catch { /* empty */ }
-  try { dirty = gitRunner(repoPath, 'status', '--porcelain').trim().length > 0; } catch { /* ignore */ }
+  // Force untracked + submodule visibility (and disable fsmonitor) so status.showUntrackedFiles=no or a
+  // submodule-ignore config can't hide the owner's WIP and suppress the dirty warning (round 22 #3).
+  try { dirty = gitRunner(repoPath, '-c', 'core.fsmonitor=false', 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none').trim().length > 0; } catch { /* ignore */ }
   // An UNBORN repo (git init, no commits) has no HEAD — a clone of it is empty and headRef's
   // `rev-parse HEAD` throws mid-run. There's nothing to work on, so it must not become a card;
   // mark it non-runnable with a clear reason instead of letting a card park on a cryptic error (round 18 #8).

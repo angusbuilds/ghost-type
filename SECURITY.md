@@ -91,8 +91,11 @@ implemented — these surface as a parked/refused card, not a silent bad ship.
 **Dirty source repositories:** the clone is built from committed **HEAD**, so a source with staged,
 unstaged, or untracked work runs the night against the committed baseline — that WIP is not included
 and the ghost's branch is based on HEAD. This is surfaced (`ghost on` prints an `uncommitted changes`
-warning) rather than refused: refusing every dirty repo would block actively-developed projects, which
-is the whole point. The morning diff shows the branch is HEAD-based; nothing local is lost.
+warning, computed with forced untracked/submodule visibility so no `status` config can hide it) rather
+than refused: refusing every dirty repo would block actively-developed projects, which is the whole
+point. One residual: the planner detects the test runner from the worktree, so an *uncommitted* change
+to the test setup could plan a runner the HEAD clone lacks — that card fails acceptance and parks (it
+never ships a wrong result). The morning diff shows the branch is HEAD-based; nothing local is lost.
 
 **Candidate-created ignored state:** acceptance runs in the worktree (so `.gitignore`d dependencies
 like `node_modules` are present), but the shipped tree excludes ignored files. An agent that makes a

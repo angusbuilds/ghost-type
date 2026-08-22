@@ -7,11 +7,13 @@ import path from 'node:path';
 import { detectTestRunner, scanRepo, runnerAvailable, usesTransformingFilters } from '../src/dossier.mjs';
 import { execFileSync } from 'node:child_process';
 
-test('usesTransformingFilters ignores a commented-out filter line, catches a real one (round 21 #8)', () => {
+test('usesTransformingFilters ignores comments and a filter=lfs PATTERN token, catches a real filter attribute (round 21 #8 / round 22 #6)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-cf-'));
   fs.writeFileSync(path.join(d, '.gitattributes'), '# filter=lfs disabled for now\n* text=auto\n');
   assert.equal(usesTransformingFilters(d), false);                   // comment + cosmetic text=auto → not a filter repo
-  fs.writeFileSync(path.join(d, '.gitattributes'), '*.bin filter=lfs -text\n');
+  fs.writeFileSync(path.join(d, '.gitattributes'), 'filter=lfs text\n');   // "filter=lfs" is the PATTERN here, "text" the attr
+  assert.equal(usesTransformingFilters(d), false);                   // must not false-positive on a pattern token
+  fs.writeFileSync(path.join(d, '.gitattributes'), '*.bin filter=lfs -text\n');   // now filter=lfs is an attribute
   assert.equal(usesTransformingFilters(d), true);                    // an actual active filter line
   fs.rmSync(d, { recursive: true, force: true });
 });

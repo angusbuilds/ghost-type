@@ -65,6 +65,11 @@ export function sterileTree(clonePath) {
         } catch (e) { throw new Error(`submodule ${f}: cannot verify HEAD/cleanliness — refusing (${e.message.split('\n')[0]})`); }
         if (head !== oid) throw new Error(`submodule ${f} HEAD ${head} != recorded ${oid} — refusing (its bytes aren't in the frozen tree)`);
         if (dirty) throw new Error(`submodule ${f} has uncommitted changes — refusing (its bytes aren't in the frozen tree)`);
+      } else if (fs.readdirSync(sub).length > 0) {
+        // A gitlink dir with content but no `.git` is NOT an initialized submodule; its bytes can drive
+        // the test yet aren't captured by the recorded gitlink OID. Only a genuinely EMPTY (uninitialized)
+        // gitlink dir is faithful to snapshot as its recorded commit (round 22 #1).
+        throw new Error(`submodule path ${f} has content but is not an initialized submodule — refusing (its bytes aren't in the frozen tree)`);
       }
       indexLines.push(`160000 ${oid}\t${f}`);
     } else addWorktree(f);
@@ -161,9 +166,13 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // reaping then deletes the agent's real commit — refuse (round 20 #4).
   if (!raw) return { pass: false, detail: { testOutput: 'acceptance passed but the candidate tree is identical to the base — refusing an empty change (no effective patch to ship)' } };
   for (const line of raw.split('\n')) {
-    const m = line.match(/^:\d{6} (\d{6}) [0-9a-f]+ [0-9a-f]+ \w/);   // :<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>
-    if (m && m[1] === '160000') {
-      return { pass: false, detail: { testOutput: `refusing: submodule ${line.split('\t').slice(1).join('\t')} was added/changed — its nested commit can't be published, so the shipped branch would reference an unavailable object (round 19 A1)` } };
+    const m = line.match(/^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ \w/);   // :<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>
+    // Refuse ANY changed gitlink — added (new 160000), modified (both 160000), DELETED (old 160000,
+    // new 000000), or type-changed. Only checking the new mode missed deletions/type-changes (round 22
+    // #2). Submodule modification isn't shippable: nested commits can't be published, and .gitmodules
+    // coordination isn't handled. A repo with an UNCHANGED submodule still runs (the gitlink is preserved).
+    if (m && (m[1] === '160000' || m[2] === '160000')) {
+      return { pass: false, detail: { testOutput: `refusing: submodule ${line.split('\t').slice(1).join('\t')} was changed (add/modify/delete/type-change) — submodule modification is unsupported and not shippable (round 22 #2)` } };
     }
   }
   // EFFECTIVE check-in-attribute guard. The scan-time dossier check reads only the root
@@ -204,10 +213,10 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // Destructive-change guard on the frozen tree (baseRef → treeBefore, so untracked additions
   // count). --no-ext-diff --no-textconv so a planted `diff.external`/`textconv` can't execute in
   // the daemon during our diff, and fsmonitor/hooks disabled (round 15). --ignore-submodules=none so
-  // `diff.ignoreSubmodules=all` can't hide a deleted gitlink from the guard, and --find-renames (with a
-  // bounded rename limit) so `diff.renames=false` can't turn a benign rename into delete+add and
-  // falsely trip the gutting thresholds (round 21 #3).
-  const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '-l5000'];
+  // `diff.ignoreSubmodules=all` can't hide a deleted gitlink from the guard, and --find-renames -l0
+  // (UNLIMITED rename detection) so `diff.renames=false` — or a huge rename that a bounded limit would
+  // skip — can't turn a benign rename into delete+add and falsely trip the gutting thresholds (round 21 #3 / round 22 #4).
+  const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '-l0'];
   const stat = git(clonePath, ...D, '--shortstat', ref, treeBefore, '--').trim();
   if (suspiciousDeletion(card.goal, stat)) {
     return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
