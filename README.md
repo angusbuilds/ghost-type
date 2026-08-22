@@ -25,8 +25,9 @@ test actually passes. In the morning you get branches to review, not an empty te
   <img src="assets/menu-bar-app.png" width="360" alt="GhostType menu-bar app — pick a session, it turns purple and drives it">
 </p>
 
-It ships as a native macOS **menu-bar app**: pick which terminal session it drives, and
-that pane turns purple while it works. Or drive everything headless from the `ghost` CLI.
+It ships as a native macOS **menu-bar app**: pick a terminal session and that pane turns purple
+to mark it. The prompt-injection loop runs via `ghost drive <pane> "<goal>"`; or drive everything
+headless from the `ghost` CLI.
 
 ## The gap it fills
 
@@ -158,9 +159,13 @@ ghost off | status | queue | report
 
 # haunt mode — drive a live terminal session
 ghost sessions                  # list your tmux panes (agents first)
-ghost haunt <pane> / unhaunt <pane>     # tint a pane purple / release it
+ghost haunt <pane> / unhaunt <pane>     # tint a pane purple / release it (marks it, does not drive)
 ghost drive <pane> "<goal>"     # watch it; type the next prompt when it goes idle
 ```
+
+The menu-bar app currently drives haunt *selection* — it tints a pane and marks it haunted. The
+injection loop itself runs via `ghost drive <pane> "<goal>"` (it needs a goal). Auto-launching the
+driver from a menu-bar click is a planned app enhancement (it needs a goal-input step first).
 
 Tunables (token cap, hard-stop hour, thresholds) live in `~/.ghosttype/config.json` —
 see [`examples/config.example.json`](examples/config.example.json). The native menu-bar app
