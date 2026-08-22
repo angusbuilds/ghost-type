@@ -138,3 +138,25 @@ test('fetchBranchBack is OID-pinned — a repointed clone branch cannot change w
   fs.rmSync(clone, { recursive: true, force: true });
   fs.rmSync(src, { recursive: true, force: true });
 });
+
+test('fetchBranchBack FAILS CLOSED onto a divergent pre-existing branch — never silently mis-lands (round 31)', () => {
+  const src = tmpRepo();
+  const clone = makeClone(src, 'ftdiv-' + process.pid);
+  const g = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
+  const base = g(clone, 'rev-parse', 'HEAD').trim();
+  fs.writeFileSync(path.join(clone, 'feature.js'), 'verified');
+  g(clone, 'add', '-A');
+  const oid = commitTreeRef(g, clone, 'ghost/x', g(clone, 'write-tree').trim(), base, 'ship');
+  // The source already carries a DIVERGENT branch of the same name (a prior run's committed work that
+  // isn't an ancestor of our verified commit). The OID-pinned fetch must be non-fast-forward-rejected
+  // so nothing lands, rather than silently overwriting or mis-landing — the last-line guard behind
+  // disambiguateBranch (round 18 #11). The verified commit shipping requires a clean/absent branch.
+  g(src, 'checkout', '-q', '-b', 'ghost/dup');
+  fs.writeFileSync(path.join(src, 'other.txt'), 'divergent prior work'); g(src, 'add', '-A'); g(src, 'commit', '-q', '-m', 'divergent');
+  const divTip = g(src, 'rev-parse', 'refs/heads/ghost/dup').trim();
+  g(src, 'checkout', '-q', 'main');
+  assert.throws(() => fetchBranchBack(src, clone, 'ghost/dup', oid));
+  assert.equal(g(src, 'rev-parse', 'refs/heads/ghost/dup').trim(), divTip);   // untouched — the divergent work is NOT clobbered
+  fs.rmSync(clone, { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
+});
