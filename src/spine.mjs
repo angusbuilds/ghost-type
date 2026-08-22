@@ -2,7 +2,7 @@
 import { classifyOutcome } from './watcher.mjs';
 import { shieldScan } from './sanitize.mjs';
 import { Ledger } from './ledger.mjs';
-import { log, byteCap } from './lib.mjs';
+import { log, byteCap, engineFailed } from './lib.mjs';
 import { DEFAULT_CALL_TIMEOUT_MS } from './engine.mjs';
 import { usageTokens } from './governor.mjs';
 
@@ -219,7 +219,7 @@ export async function runProposal(card, deps) {
       maxBudgetUsd: Number.isFinite(rem$) ? Math.min(1, rem$) : 1 });
     if (governor) { if (r?.usage) governor.addUsage(r.usage); const cost = r?.costUsd ?? r?.result?.total_cost_usd; if (cost) governor.addCost(cost); }
     const plan = (r?.text || '').trim();
-    if (!plan || (r?.exitCode ?? 0) !== 0) return skip('proposal engine call failed — no plan produced');
+    if (!plan || engineFailed(r)) return skip('proposal engine call failed — no plan produced');   // incl. a structured is_error limit (round 28 #3-variant)
     writePlan(clonePath, `# Plan — ${card.goal}\n\n${plan}\n`);
     const commitOid = commit(clonePath, card.branch, {});   // non-tree path: adds PLAN.md + commits
     return { project: card.project, goal: card.goal, outcome: 'proposed', mergeReady: false,

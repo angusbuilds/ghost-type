@@ -1,15 +1,8 @@
 // src/prompt-writer.mjs
-import { byteCap } from './lib.mjs';
+import { byteCap, engineFailed } from './lib.mjs';
 import { fence, scrubSecrets, shieldScan } from './sanitize.mjs';
 
 const CAP = 12000;
-
-// A writer engine call FAILED if it exited nonzero OR returned a structured provider error
-// (subtype:success + is_error:true — Claude's rate/usage-limit shape). Its text must never become a
-// prompt or diagnosis; the caller restates the goal / drops the diagnosis instead (round 28 #3-variant).
-function writerFailed(r) {
-  return Boolean(r && ((r.exitCode != null && r.exitCode !== 0) || r.result?.is_error === true));
-}
 
 // Compose the next prompt in Angus's voice. All repo-derived inputs are treated as
 // untrusted data: scrubbed, byte-capped, fenced, and shield-scanned. A shield hit is
@@ -47,7 +40,7 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
   // A failure is a nonzero exit OR a STRUCTURED provider error (Claude reports a rate/usage limit as
   // subtype:success + is_error:true with exit 0 — an exitCode-only check would inject that limit
   // message as the next prompt). Empty text from a real success is passed through (round 28 #3-variant).
-  if (writerFailed(r)) return card.goal;
+  if (engineFailed(r)) return card.goal;
   return (r.text || '').trim();
 }
 
@@ -64,6 +57,6 @@ export async function diagnoseFailure({ goal, rawTrace, engine }) {
   });
   // A failed writer call must not become the diagnosis text (round 6 #5) — diagnosis is optional,
   // so drop it (incl. a structured is_error limit, round 28 #3-variant) and proceed without one.
-  if (writerFailed(r)) return '';
+  if (engineFailed(r)) return '';
   return (r.text || '').trim();
 }

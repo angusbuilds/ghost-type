@@ -3,6 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 
+test('generateCandidates rejects a structured is_error (rate-limit) result — no limit message becomes a candidate (round 28 #3-variant)', async () => {
+  const engine = async () => ({ exitCode: 0, result: { subtype: 'success', is_error: true }, text: "You've hit your usage limit." });
+  const cands = await generateCandidates({ context: 'ctx', n: 3, engine });
+  assert.deepEqual(cands, []);   // the limit message is NOT a candidate prompt
+});
+
 test('generateCandidates returns n non-empty distinct-ish drafts', async () => {
   let call = 0;
   const engine = async () => ({ text: `candidate ${++call}` });

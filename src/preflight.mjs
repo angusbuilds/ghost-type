@@ -1,18 +1,17 @@
 // src/preflight.mjs
 // Cheap pre-flight: draft a few candidate next-prompts and let a fast model vote for the
 // one likeliest to make progress, before a full (expensive) coding session is ever spent.
-import { byteCap } from './lib.mjs';
+import { byteCap, engineFailed } from './lib.mjs';
 
 const CAND_CAP = 4000;    // one candidate prompt should be short
 const VOTE_CAP = 40000;   // the whole assembled vote prompt
 
-// Text from an engine call is only usable if the CALL SUCCEEDED — otherwise a transport
-// failure ("spawn error", "network unreachable") would become a candidate/prompt (round 5 M5).
-// A mock/simple writer (no exitCode) is trusted; only an explicit nonzero exit is discarded.
+// Text from an engine call is only usable if the CALL SUCCEEDED — otherwise a transport failure
+// ("spawn error", "network unreachable") OR a structured provider error (a rate/usage limit reported
+// as is_error:true, exit 0) would become a candidate/prompt (round 5 M5 / round 28 #3-variant).
 function okText(r) {
-  if (!r) return '';
-  if (r.exitCode != null && r.exitCode !== 0) return '';
-  return String(r.text || '').trim();
+  if (engineFailed(r)) return '';
+  return String(r?.text || '').trim();
 }
 
 export async function generateCandidates({ context, n = 3, engine }) {

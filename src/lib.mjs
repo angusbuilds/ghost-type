@@ -58,6 +58,14 @@ export function log(entry) {
   } catch { /* logging must never throw */ }
 }
 
+// An engine call FAILED if it exited nonzero OR returned a STRUCTURED provider error — Claude reports
+// a rate/usage limit as the contradictory subtype:success + is_error:true shape with exit 0 (round 28
+// #3). Its text must NEVER be reused as a next-prompt, candidate, plan, diagnosis, or voice profile;
+// an exitCode-only check leaks the limit message into all of those (round 28 #3-variant, systematized).
+export function engineFailed(r) {
+  return Boolean(r && ((r.exitCode != null && r.exitCode !== 0) || r.result?.is_error === true));
+}
+
 // Truncate to a byte ceiling, appending a visible marker when cut.
 export function byteCap(text, maxBytes) {
   const buf = Buffer.from(String(text), 'utf8');

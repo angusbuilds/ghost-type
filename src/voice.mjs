@@ -4,7 +4,7 @@
 // full-corpus clustering pipeline is later.
 import fs from 'node:fs';
 import path from 'node:path';
-import { GHOST_HOME, byteCap } from './lib.mjs';
+import { GHOST_HOME, byteCap, engineFailed } from './lib.mjs';
 import { fence } from './sanitize.mjs';
 import { collectPrompts } from './transcript.mjs';
 
@@ -87,9 +87,9 @@ export async function distillVoiceProfile({ prompts, engine, maxEach = 500, maxT
       'Be concrete and quote real phrasings they use. Output only the markdown.',
     ].join('\n\n'),
   });
-  // A FAILED engine call returns its ERROR text (e.g. "fetch failed: ENOTFOUND"), not a profile —
-  // signal empty so `learn` won't persist the error over a good profile (round 28 #11).
-  if (r && (r.exitCode ?? 0) !== 0) return '';
+  // A FAILED engine call returns its ERROR text (a transport error, or a rate/usage limit as
+  // is_error:true) — signal empty so `learn` won't persist that over a good profile (round 28 #11 + #3-variant).
+  if (engineFailed(r)) return '';
   return (r.text || '').trim();
 }
 

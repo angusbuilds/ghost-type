@@ -96,6 +96,13 @@ test('distillVoiceProfile bounds a monster prompt so the call stays cheap', asyn
   assert.ok(seenLen < 45000, `sample was capped (${seenLen} bytes)`);   // not 700KB
 });
 
+test('distillVoiceProfile returns empty for a structured is_error (rate-limit), so learn keeps the good profile (round 28 #3-variant)', async () => {
+  const { distillVoiceProfile } = await import('../src/voice.mjs');
+  const engine = async () => ({ exitCode: 0, result: { subtype: 'success', is_error: true }, text: "You've hit your usage limit." });
+  const profile = await distillVoiceProfile({ prompts: [{ text: 'gooo' }], engine });
+  assert.equal(profile, '');   // not the limit message → learn won't persist it
+});
+
 test('loadVoice returns safe defaults when unlearned', () => {
   const v = loadVoice('/nonexistent/voice/dir');
   assert.match(v.profile, /direct|terse/);
