@@ -192,6 +192,23 @@ test('a failed writer call in haunt mode never injects the error text (round 7 M
   assert.match(r.prompt, /parser/);                       // falls back to the goal instead
 });
 
+test('a Claude RATE-LIMIT (exit 0, is_error:true) in haunt mode also falls back to the goal, never injects the limit text (round 28/29)', async () => {
+  // The insidious shape: Claude reports a usage limit as subtype:success + is_error:true with
+  // exit 0 — an exit-code-only guard would treat it as a real prompt and type the limit banner
+  // straight into the owner's live pane. engineFailed() catches it via result.is_error; this
+  // pins that at the drive boundary so a narrowed guard can't silently regress the live path.
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'keep fixing the parser', prev: 'agent output here', deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'claude' : 'agent output here',
+    sendKeys: (id, k) => sent.push(k), humanIdleSecs: () => 999,
+    engine: async () => ({ exitCode: 0, result: { subtype: 'success', is_error: true }, text: 'Claude usage limit reached. Your limit will reset at 6pm.' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'injected');
+  assert.doesNotMatch(r.prompt, /usage limit|reset at/i);   // the limit banner is never injected
+  assert.match(r.prompt, /parser/);                         // falls back to the goal instead
+});
+
 test('driveStep keeps polling (does not terminate) while a subprocess/tool runs (round 4 #5)', async () => {
   // foreground is `git` (a tool the agent spawned) — neither shell nor agent → 'working', never 'shell'.
   const sent = [];
