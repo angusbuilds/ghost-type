@@ -41,19 +41,35 @@ function safeList(dir) { try { return fs.readdirSync(dir); } catch { return []; 
 // Count (and roughly size) the `.crashed-*` clones quarantined in the work dir. These are
 // preserved forever by design (clone.mjs never deletes crashed work), so `ghost doctor` reports
 // the backlog and its disk footprint — the owner reviews and clears them by hand. Size is a
-// best-effort `du`; a du failure still yields the actionable count. null on an unreadable dir.
+// best-effort `du`; a du failure still yields the actionable count. Returns null (→ doctor shows
+// "could not read the work dir") on an unreadable dir — read directly here rather than via
+// safeList, whose swallow-to-[] would falsely report "no crashed clones held" (round 30 audit #1).
 export function realQuarantineBacklog(dir = WORK_DIR) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+  catch { return null; }   // unreadable → unknown, NOT clean
+  // Match the end-anchored quarantine suffix on real directories: `.crashed-<ms>` with an OPTIONAL
+  // `-<6 hex>` (current clone.mjs appends the hex; older versions did not — both are real crashed
+  // clones). This excludes a like-named file or a legit clone that merely contains the substring,
+  // without hiding old-format quarantines (round 30 audit #2, refined to cover both naming eras).
+  const names = entries.filter(e => e.isDirectory() && /\.crashed-\d+(-[0-9a-f]{6})?$/.test(e.name)).map(e => e.name);
+  if (names.length === 0) return { count: 0, sizeMB: 0 };
+  const paths = names.map(n => path.join(dir, n));
+  let sizeMB = null;
   try {
-    const names = safeList(dir).filter(n => n.includes('.crashed-'));
-    if (names.length === 0) return { count: 0, sizeMB: 0 };
-    let sizeMB = null;
-    try {
-      const out = execFileSync('du', ['-ck', ...names.map(n => path.join(dir, n))]).toString().trim().split('\n');
-      const kb = Number(out[out.length - 1].split(/\s+/)[0]);   // grand-total row from `du -c`
-      if (Number.isFinite(kb)) sizeMB = Math.round(kb / 1024);
-    } catch { /* size is best-effort — the count is the actionable part */ }
-    return { count: names.length, sizeMB };
-  } catch { return null; }
+    let totalKb = 0;
+    // Batch under ARG_MAX, and `-s` so du summarizes each clone rather than emitting every nested
+    // object dir (which can overrun the output buffer). Any batch that fails or parses non-finite
+    // drops size to null — never a silent undercount (round 30 audit #3).
+    for (let i = 0; i < paths.length; i += 256) {
+      const out = execFileSync('du', ['-sck', ...paths.slice(i, i + 256)]).toString().trim().split('\n');
+      const kb = Number(out[out.length - 1].split(/\s+/)[0]);   // batch grand-total row from `du -c`
+      if (!Number.isFinite(kb)) throw new Error('unparseable du total');
+      totalKb += kb;
+    }
+    sizeMB = Math.round(totalKb / 1024);
+  } catch { /* size is best-effort — the count is the actionable part */ }
+  return { count: names.length, sizeMB };
 }
 
 // Refuse to arm on battery, low disk, OR an unknown probe result — the silent-death causes.

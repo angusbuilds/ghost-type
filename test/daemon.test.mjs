@@ -1,7 +1,7 @@
 // test/daemon.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { armChecks, reconcile, reap, reapClone } from '../src/daemon.mjs';
+import { armChecks, reconcile, reap, reapClone, realQuarantineBacklog } from '../src/daemon.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -103,4 +103,31 @@ test('reap refuses a SYMLINKED work root outright — deletes nothing (round 4: 
   assert.deepEqual(out, []);            // refused via lstat — nothing removed through the symlink
   assert.deepEqual(removed, []);
   fs.rmSync(base, { recursive: true, force: true });
+});
+
+// realQuarantineBacklog surfaces the preserved `.crashed-*` clones (round 30 audit fixes).
+test('realQuarantineBacklog counts ONLY exact-suffix quarantine directories', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-qb-'));
+  fs.mkdirSync(path.join(base, 'ghost_x.crashed-1787000000000-abc123'));   // current format (with hex) → counts
+  fs.mkdirSync(path.join(base, 'ghost_y.crashed-1787000000002'));          // OLD format (no hex) → still counts
+  fs.mkdirSync(path.join(base, 'foo.crashed-notavalidsuffix'));            // wrong suffix shape → ignored
+  fs.mkdirSync(path.join(base, 'ghost_active'));                          // an ordinary clone → ignored
+  fs.writeFileSync(path.join(base, 'y.crashed-1787000000001-def456'), '');// a FILE, not a dir → ignored
+  const q = realQuarantineBacklog(base);
+  assert.equal(q.count, 2);                        // both quarantine dirs, across naming eras
+  assert.ok(Number.isFinite(q.sizeMB) && q.sizeMB >= 0);   // size is a real number, never a crash
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('realQuarantineBacklog reports a clean work dir as count 0', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-qb0-'));
+  fs.mkdirSync(path.join(base, 'ghost_active'));
+  assert.deepEqual(realQuarantineBacklog(base), { count: 0, sizeMB: 0 });
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('realQuarantineBacklog returns null (unknown), NOT clean, for an unreadable work dir', () => {
+  // The doctor renders null as "could not read the work dir" — an unreadable dir must never
+  // masquerade as "no crashed clones held" (round 30 audit #1: safeList swallowed the error to []).
+  assert.equal(realQuarantineBacklog(path.join(os.tmpdir(), 'gt-does-not-exist-' + process.pid)), null);
 });
