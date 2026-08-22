@@ -136,10 +136,16 @@ parent dir, gitlink; nested untracked repos; non-ignored empty dirs git can't st
   governor trip are reported `skipped`; a same-day rerun ships a sibling branch, not a lost non-ff.
 
 ### Proof
-- 299 offline unit tests (`node --test`), zero runtime dependencies.
+- 300 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main
   untouched, no push); the OS sandbox verified to block external writes while keeping the API up.
+- **Dependency bootstrap proven end-to-end** — a real card whose acceptance (`npm test`) needs an
+  uninstalled dependency was driven through the live runner: iteration 1 failed (dep missing), the
+  writer diagnosed it and rewrote the prompt to `npm install` first, iteration 2 installed and
+  passed. The shipped tree carries `package-lock.json` but not `node_modules`.
+- **Per-pane tint verified against real tmux 3.7b** — `select-pane -P` sets and clears the pane
+  background as intended (an integration test drives the real command, not a mock).
 - Independently audited by Codex (`gpt-5.6-sol`, xhigh) across twenty-eight rounds — each round
   verifying the prior round's fixes held and were complete, not just plausible.
