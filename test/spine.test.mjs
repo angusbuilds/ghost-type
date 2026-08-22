@@ -42,6 +42,21 @@ test('the engine call is bounded to remaining $ AND the 45-min ceiling, not the 
   assert.equal(seen[0].timeoutMs, 45 * 60 * 1000);  // min(45min, 2h to deadline) — the ceiling, not 2h (the H3 bug)
 });
 
+test('the card parks (never verifies past the deadline with a 1s-floored test) (round 9 Low)', async () => {
+  let verified = 0;
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  let t = NOW;
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 100, nightDeadlineMs: NOW + 1000, maxConsecErrors: 9 });   // 1s to deadline
+  const r = await runCard(card, deps({
+    now: () => t, governor: gov,
+    runEngine: async () => { t = NOW + 2000; return { exitCode: 0, result: { subtype: 'success', result: 'done' }, usage: {}, text: 'done' }; },   // the call crosses the deadline
+    verify: async () => { verified += 1; return { pass: true, detail: { testOutput: 'ok' } }; },
+  }));
+  assert.equal(r.outcome, 'parked');
+  assert.match(r.whyLine, /night-deadline/);
+  assert.equal(verified, 0);   // deadline passed mid-call → parked before running the test, not a 1s-floored run
+});
+
 test('the card parks without spending when too little dollar headroom remains (round 7 H3)', async () => {
   let calls = 0;
   const NOW = Date.parse('2026-08-21T22:00:00Z');

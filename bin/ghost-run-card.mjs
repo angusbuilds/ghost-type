@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const card = loadCard(process.argv[2]);
+const CONFIG = loadConfig();
 const env = buildSessionEnv([], process.env, card.engine);   // scope creds to the card's engine (round 5 M9)
 const allowedTools = allowedToolsFor(card.acceptanceArgv);
 const git = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
@@ -34,6 +35,7 @@ const deps = {
     prompt: writer ? prompt : shapeForEngine(prompt, card.engine, card),
     allowedTools: writer ? 'Read' : allowedTools,       // Claude read-only tools for writer
     sandbox: writer ? 'read-only' : 'workspace-write',  // Codex read-only sandbox for writer
+    sandboxClone: CONFIG.sandbox ? cwd : undefined,     // OS write-confinement — was missing here (round 9 Critical)
     maxTurns: writer ? 1 : card.maxTurns,
     maxBudgetUsd: writer ? 1 : card.maxBudgetUsd,
     env,
@@ -53,7 +55,7 @@ const deps = {
   }),
   // Shared verifier — includes the deletion guard, so this packaged runner can't ship a
   // destructive diff on a passing test (round 5 H1); sandbox the acceptance test when configured.
-  verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: loadConfig().sandbox }),
+  verify: (c, clonePath, opts) => verifyCard(c, clonePath, { ...opts, sandbox: CONFIG.sandbox }),
   classifyClaim,
   diagnoseFailure,
   generateCandidates,

@@ -189,3 +189,16 @@ test('destructiveDiffReason closes the round-8 bypasses: binary + more Node test
   // a deletion goal still allows removing a stale binary
   assert.equal(destructiveDiffReason('remove the old model asset', '-\t-\tassets/model.bin', 'D\tassets/model.bin'), null);
 });
+
+test('destructiveDiffReason closes the round-9 exemption bypasses', () => {
+  // "fix the failing parser test" mentions "test" but has no deletion intent → deleting the test is refused
+  assert.match(destructiveDiffReason('fix the failing parser test', '0\t40\tparser.test.js', 'D\tparser.test.js'), /deletes test file/);
+  // a MIXED goal ("fix ... and remove ...") must not disable the size guard
+  assert.match(destructiveDiffReason('fix parser and remove a debug log', '0\t1000\tsrc/parser.js', 'M\tsrc/parser.js'), /1000 net lines/);
+  // ...nor the binary guard
+  assert.match(destructiveDiffReason('fix parser and remove a debug log', '-\t-\tassets/model.bin', 'D\tassets/model.bin'), /binary asset/);
+  // Node's test-<name>.mjs prefix is recognized
+  assert.match(destructiveDiffReason('make green', '0\t30\tsrc/test-parser.mjs', 'D\tsrc/test-parser.mjs'), /deletes test file/);
+  // explicit test-removal intent (deletion word + test) is still allowed
+  assert.equal(destructiveDiffReason('remove the flaky parser test', '0\t40\tparser.test.js', 'D\tparser.test.js'), null);
+});

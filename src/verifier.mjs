@@ -98,9 +98,10 @@ export function suspiciousDeletion(goal, diffStat) {
 // A goal that EXPLICITLY asks to delete/remove — only then is a net-negative diff expected.
 const DELETION_GOAL = /\b(delete|remove|drop|clean\s*up|dead\s*code|prune|strip|deprecate|get\s*rid)\b/i;
 // Test/spec files whose deletion is almost always "make it pass by removing the test". Covers
-// dir-based (test/, __tests__/), suffix (.test.js, _test.go, -test.js), root-level (test_parser.py,
-// test.js, tests.js) — the actual discovery patterns of the runners we support.
-const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test_[^/]+\.[a-z]+$|[._-](test|spec)\.[a-z]+$|(^|\/)conftest\.py$|(^|\/)tests?\.[a-z]+$/i;
+// dir-based (test/, __tests__/), suffix (.test.js, _test.go, -test.js), and both prefix forms
+// (test_parser.py, test-parser.mjs) plus root-level (test.js, tests.js) — the actual discovery
+// patterns of the runners we support.
+const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test[_-][^/]+\.[a-z]+$|[._-](test|spec)\.[a-z]+$|(^|\/)conftest\.py$|(^|\/)tests?\.[a-z]+$/i;
 
 // Stronger destructive-change guard: cross-references per-file deltas (`--numstat`) with file
 // operations (`--name-status`), not just shortstat totals. A non-"build" goal that guts a file,
@@ -109,26 +110,31 @@ const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test_[^/]+\.[a-z]+$|[._-]
 // a reason or null.
 export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   const g = String(goal);
-  const testGoal = /\b(test|spec)s?\b/i.test(g);
-  const deletionGoal = DELETION_GOAL.test(g);
+  const hasDeletion = DELETION_GOAL.test(g);
+  const hasBuildOrFix = BUILD_GOAL.test(g) || /\bfix(ed|es|ing)?\b/i.test(g);
+  // ONLY a pure deletion goal (deletion words, no build/fix intent) disables the size/binary
+  // guards — a MIXED goal like "fix parser and remove a debug log" must not (round 9 High).
+  const pureDeletionGoal = hasDeletion && !hasBuildOrFix;
+  // A test deletion is exempt only with EXPLICIT test-removal intent (a deletion word AND a test
+  // word) — not merely mentioning "test", so "fix the failing parser test" no longer exempts
+  // deleting the test (round 9 High).
+  const testRemovalIntent = hasDeletion && /\b(tests?|specs?)\b/i.test(g);
   // Map each file to its numstat so we can tell a binary deletion (`-\t-`) from a text one.
   const sizes = {};
   for (const l of String(numstat).split('\n')) {
     const [add, del, file] = l.split('\t');
     if (file) sizes[file] = { add, del, binary: add === '-' || del === '-' };
   }
-  // File-operation checks run ALWAYS (even under a deletion goal) unless the goal is explicitly
-  // about tests — deleting a test/binary to pass is rarely the real intent (round 7 High#4 / round 8).
   for (const l of String(nameStatus).split('\n')) {
     const del = l.match(/^D\t(.+)$/);
     if (del) {
-      if (TESTISH.test(del[1]) && !testGoal) return `deletes test file ${del[1]}`;
-      if (sizes[del[1]]?.binary && !deletionGoal) return `deletes binary asset ${del[1]}`;   // size hidden in numstat
+      if (TESTISH.test(del[1]) && !testRemovalIntent) return `deletes test file ${del[1]}`;
+      if (sizes[del[1]]?.binary && !pureDeletionGoal) return `deletes binary asset ${del[1]}`;   // size hidden in numstat
     }
     const ren = l.match(/^R\d*\t(.+)\t(.+)$/);
-    if (ren && TESTISH.test(ren[1]) && !TESTISH.test(ren[2]) && !testGoal) return `renames test ${ren[1]} out of test discovery`;
+    if (ren && TESTISH.test(ren[1]) && !TESTISH.test(ren[2]) && !testRemovalIntent) return `renames test ${ren[1]} out of test discovery`;
   }
-  if (deletionGoal) return null;   // explicit deletion goal — the size checks below don't apply
+  if (pureDeletionGoal) return null;   // ONLY a pure deletion goal skips the size checks below
   // Per-file gutting (>=100 catches exactly-100) OR aggregate net deletion across many files.
   let aggNeg = 0;
   for (const f of Object.keys(sizes)) {
