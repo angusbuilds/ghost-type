@@ -113,7 +113,7 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
 - **Newline-in-filename** paths snapshot via NUL-delimited `update-index -z --index-info`.
 
 ### Proof
-- 293 offline unit tests (`node --test`), zero runtime dependencies.
+- 294 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main
