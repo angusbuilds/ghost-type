@@ -16,7 +16,7 @@ export function detectPackageManager(repoPath, pkg) {
   if (['pnpm', 'yarn', 'bun', 'npm'].includes(declared)) return declared;
   if (fs.existsSync(path.join(repoPath, 'pnpm-lock.yaml'))) return 'pnpm';
   if (fs.existsSync(path.join(repoPath, 'yarn.lock'))) return 'yarn';
-  if (fs.existsSync(path.join(repoPath, 'bun.lockb'))) return 'bun';
+  if (fs.existsSync(path.join(repoPath, 'bun.lockb')) || fs.existsSync(path.join(repoPath, 'bun.lock'))) return 'bun';   // bun 1.2+ uses the text bun.lock
   return 'npm';   // package-lock.json or nothing → npm
 }
 

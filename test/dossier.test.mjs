@@ -28,6 +28,7 @@ test('detectTestRunner uses the DECLARED package manager (pnpm/yarn/bun), not al
   const test = { scripts: { test: 'vitest run' } };
   assert.deepEqual(detectTestRunner(mk({ ...test, packageManager: 'pnpm@11.5.0' })), ['pnpm', 'test']);   // declared field wins
   assert.deepEqual(detectTestRunner(mk(test, { 'yarn.lock': '' })), ['yarn', 'test']);                    // lockfile fallback
+  assert.deepEqual(detectTestRunner(mk(test, { 'bun.lock': '' })), ['bun', 'run', 'test']);               // bun 1.2+ text lockfile (round 29)
   assert.deepEqual(detectTestRunner(mk({ ...test, packageManager: 'bun@1.3.0' })), ['bun', 'run', 'test']); // bun needs `run` (bare `bun test` is its own runner)
   assert.deepEqual(detectTestRunner(mk(test)), ['npm', 'test']);                                          // no manager → npm (unchanged)
 });

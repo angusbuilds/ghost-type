@@ -37,9 +37,8 @@ export function parseResetTime(text, nowMs) {
       if (c[3]) { const pm = c[3][0] === 'p'; hour = (hour % 12) + (pm ? 12 : 0); }
       const d = new Date(nowMs);
       d.setHours(hour, min, 0, 0);
-      let target = d.getTime();
-      if (target <= nowMs) target += 24 * 3_600_000;   // already past today → next day
-      return target;
+      if (d.getTime() <= nowMs) d.setDate(d.getDate() + 1);   // past today → next day, DST-safe (not +24h, which
+      return d.getTime();                                     // shifts the clock time across a DST transition)
     }
   }
   return null;
