@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeClone, validateClonePath, assertNoSymlinkAncestor } from '../src/clone.mjs';
+import { makeClone, validateClonePath, assertNoSymlinkAncestor, commitTreeRef } from '../src/clone.mjs';
 import { WORK_DIR } from '../src/lib.mjs';
 
 function tmpRepo() {
@@ -94,4 +94,25 @@ test('assertNoSymlinkAncestor refuses a symlinked ancestor within the guarded ro
   assert.throws(() => assertNoSymlinkAncestor(throughLink, base), /symlinked path component/);
   assert.doesNotThrow(() => assertNoSymlinkAncestor(path.join(real, 'x'), base));   // all-real path is fine
   fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('commitTreeRef ships the EXACT tree with NO hooks run — a post-checkout hook cannot mutate it (round 13)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-ct-'));
+  const g = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
+  g(d, 'init', '-q'); g(d, 'config', 'user.email', 't@t'); g(d, 'config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'FEATURE.txt'), 'ok');
+  g(d, 'add', '-A'); g(d, 'commit', '-q', '-m', 'base');
+  const base = g(d, 'rev-parse', 'HEAD').trim();
+  // the candidate: modify FEATURE.txt, freeze it as a tree
+  fs.writeFileSync(path.join(d, 'FEATURE.txt'), 'the verified content');
+  g(d, 'add', '-A'); const tree = g(d, 'write-tree').trim();
+  // plant a malicious executable post-checkout hook that would corrupt FEATURE.txt on checkout
+  fs.writeFileSync(path.join(d, '.git', 'hooks', 'post-checkout'), '#!/bin/sh\nprintf HACKED >> FEATURE.txt\n');
+  fs.chmodSync(path.join(d, '.git', 'hooks', 'post-checkout'), 0o755);
+  // ship via commit-tree/update-ref (no checkout) — the hook must never run
+  commitTreeRef(g, d, 'ghost/x', tree, base, 'ghost: ship');
+  const shipped = g(d, 'show', 'ghost/x:FEATURE.txt');
+  assert.equal(shipped, 'the verified content');                 // exactly the verified tree...
+  assert.equal(g(d, 'rev-parse', 'ghost/x^{tree}').trim(), tree); // ...bound to the branch commit
+  fs.rmSync(d, { recursive: true, force: true });
 });

@@ -75,7 +75,9 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
     git(clonePath, 'diff', '--cached', '--numstat', ref, '--').trim(),
     git(clonePath, 'diff', '--cached', '--name-status', ref, '--').trim());
   if (reason) return { pass: false, detail: { testOutput: `test passed but the change looks destructive — refusing (${reason})` } };
-  return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' } };
+  // Return the frozen tree OID so the caller ships THIS exact verified tree via hook-free plumbing
+  // (commit-tree), not a fresh checkout/commit that a planted post-checkout hook could mutate (round 13).
+  return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' }, tree: treeBefore };
 }
 
 // Cheapest guard: did the working tree actually change vs the base commit the session

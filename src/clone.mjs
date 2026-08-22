@@ -65,6 +65,17 @@ export function makeClone(repoPath, taskId) {
   return clonePath;
 }
 
+// Ship the EXACT verified tree onto `branch` with hook-free plumbing: commit-tree builds a commit
+// from a tree OID and update-ref points the branch at it — neither runs a git hook and neither
+// checks out, so a planted post-checkout/pre-commit hook can't mutate what ships (round 13).
+// `git` is injected as (cwd, ...args) => stdout. Returns the new commit OID.
+export function commitTreeRef(git, clonePath, branch, tree, baseRef, msg) {
+  const parent = git(clonePath, 'rev-parse', baseRef).trim();
+  const oid = git(clonePath, 'commit-tree', tree, '-p', parent, '-m', msg).trim();
+  git(clonePath, 'update-ref', `refs/heads/${branch}`, oid);
+  return oid;
+}
+
 // Pull a completed branch back into the real repo WITHOUT pushing: fetch from the
 // clone into the source. The real repo is only ever a fetch destination, never a push target.
 export function fetchBranchBack(repoPath, clonePath, branch) {

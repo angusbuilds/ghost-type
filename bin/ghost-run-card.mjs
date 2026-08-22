@@ -3,7 +3,7 @@
 // Usage: node bin/ghost-run-card.mjs path/to/card.json
 import { loadCard } from '../src/card.mjs';
 import { runCard } from '../src/spine.mjs';
-import { makeClone, fetchBranchBack } from '../src/clone.mjs';
+import { makeClone, fetchBranchBack, commitTreeRef } from '../src/clone.mjs';
 import { runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
@@ -42,13 +42,14 @@ const deps = {
   }),
   // Commit the result onto the card's branch. The clone is fresh, so this cleanly
   // captures whatever the agent left in the working tree (or its own commit).
-  commit: (clonePath, branch) => {
+  commit: (clonePath, branch, { tree, baseRef } = {}) => {
     git(clonePath, 'config', 'user.email', 'ghost@ghosttype.local');
     git(clonePath, 'config', 'user.name', 'Ghost Type');
+    const msg = `ghost: ${card.goal.slice(0, 60)}`;
+    if (tree && baseRef) { commitTreeRef(git, clonePath, branch, tree, baseRef, msg); return; }   // hook-free ship (round 13)
     try { git(clonePath, 'checkout', '-B', branch); } catch { /* already there */ }
     const dirty = git(clonePath, 'status', '--porcelain').trim();
-    // --no-verify: a pre-commit hook must not rewrite the verified tree before shipping (round 12).
-    if (dirty) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', `ghost: ${card.goal.slice(0, 60)}`); }
+    if (dirty) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', msg); }
   },
   gitDiff: (cwd) => ({
     stat: git(cwd, 'diff', '--shortstat', 'HEAD'),

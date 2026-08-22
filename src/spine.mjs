@@ -148,7 +148,9 @@ export async function runCard(card, deps) {
 
     if (v.pass) {
       governor?.noteOk();
-      commit(clonePath, card.branch);
+      // Ship the EXACT verified tree (v.tree) via hook-free plumbing, not a fresh checkout that a
+      // planted post-checkout hook could mutate (round 13). baseRef is the commit's parent.
+      commit(clonePath, card.branch, { tree: v.tree, baseRef });
       recordPrompt({ iteration: iterations, prompt, outcome: 'shipped', project: card.project });
       log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount, tokensUsed, costUsd });
       return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed, costUsd };

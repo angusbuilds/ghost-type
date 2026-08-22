@@ -23,7 +23,7 @@ import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
-import { makeClone, fetchBranchBack } from '../src/clone.mjs';
+import { makeClone, fetchBranchBack, commitTreeRef } from '../src/clone.mjs';
 import { renderReport } from '../src/report.mjs';
 import { renderReportHtml } from '../src/report-html.mjs';
 import { notifyVerdict } from '../src/notify.mjs';
@@ -97,13 +97,13 @@ function cardDeps(card, voice) {
     headRef: (clonePath) => git(clonePath, 'rev-parse', 'HEAD').trim(),
     patchApplied,
     runEngine: realEngine(card),
-    commit: (clonePath, branch) => {
+    commit: (clonePath, branch, { tree, baseRef } = {}) => {
       git(clonePath, 'config', 'user.email', 'ghost@ghosttype.local');
       git(clonePath, 'config', 'user.name', 'Ghost Type');
+      const msg = `ghost: ${String(card.goal).slice(0, 60)}`;
+      if (tree && baseRef) { commitTreeRef(git, clonePath, branch, tree, baseRef, msg); return; }   // hook-free ship (round 13)
       try { git(clonePath, 'checkout', '-B', branch); } catch { /* already */ }
-      // --no-verify: never let a (planted or benign) pre-commit hook rewrite the verified tree
-      // between verification and shipping (round 12).
-      if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', `ghost: ${String(card.goal).slice(0, 60)}`); }
+      if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', msg); }
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
     // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1);
