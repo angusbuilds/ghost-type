@@ -41,6 +41,20 @@ break work that legitimately needs the network or writes outside the clone. It's
 macOS; there, or for stronger isolation, run the daemon as a dedicated low-privilege user or
 inside a VM/container.
 
+## The acceptance test is the oracle
+
+Verification runs the project's own acceptance command and trusts its exit code. Two guards
+keep a rigged test from shipping junk: the candidate's **full tree is frozen** (tracked +
+untracked, `.gitignore`-respecting) before the test runs and any change to it is refused — so a
+test that erases or rewrites its own patch to fake a pass is caught — and a **destructive-diff
+guard** refuses net-negative / test-deleting changes.
+
+What no diff guard can catch is an agent that **weakens the oracle itself** — editing a test's
+assertions or a `package.json` test script so the check passes trivially. On your **own** repos
+that's ordinary test-driven development, not an attack. On **untrusted** repos, the `sandbox`
+flag and these guards narrow it, but a protected/immutable oracle (or a human-reviewed test
+diff) is the only complete answer — treat the morning report's diff as the real gate.
+
 ## Cost governance is Claude-specific
 
 The hard **dollar** cap is enforced for Claude (via `--max-budget-usd` + metered `total_cost_usd`).

@@ -210,32 +210,57 @@ test('destructiveDiffReason closes the round-10 lexical gaps', () => {
   assert.match(destructiveDiffReason('remove debug logging and fix parser tests', '0\t40\tparser.test.js', 'D\tparser.test.js'), /deletes test file/);
 });
 
-test('verifyCard refuses when the acceptance test REVERTS the candidate patch (round 10 High)', async () => {
-  const d = tmpGit();   // a.txt = "hi", committed
+test('destructiveDiffReason closes the round-11 lexical gaps', () => {
+  // clause breaks "while"/"so" now separate the deletion word from the test word → not exempt
+  assert.match(destructiveDiffReason('remove debug output while fixing parser tests', '0\t40\tparser.test.js', 'D\tparser.test.js'), /deletes test file/);
+  assert.match(destructiveDiffReason('remove debug output so parser tests pass', '0\t40\tparser.test.js', 'D\tparser.test.js'), /deletes test file/);
+  // "refactor" now counts as build/fix intent → a 1000-line gut is not a pure deletion → caught
+  assert.match(destructiveDiffReason('refactor parser and remove dead code', '0\t1000\tsrc/parser.js', 'M\tsrc/parser.js'), /1000 net lines/);
+});
+
+test('verifyCard refuses a test that ERASES an UNTRACKED candidate file (round 11 High)', async () => {
+  const d = tmpGit();
   const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
-  fs.writeFileSync(path.join(d, 'a.txt'), 'the real candidate change');   // the patch (modifies a tracked file)
-  // a rigged acceptance test that erases its own change back to base, then exits 0
+  fs.writeFileSync(path.join(d, 'feature.js'), 'export const f = () => 1;');   // UNTRACKED new candidate file
+  // a rigged test that deletes the (untracked) candidate then exits 0 — the round-10 filename check missed this
   const card = {
     goal: 'add a feature',
-    acceptanceArgv: ['node', '-e', 'require("child_process").execFileSync("git",["checkout","HEAD","--","a.txt"],{cwd:process.cwd()}); process.exit(0)'],
+    acceptanceArgv: ['node', '-e', 'require("fs").unlinkSync("feature.js"); process.exit(0)'],
     acceptanceTimeoutSec: 20,
   };
   const v = await verifyCard(card, d, { baseRef: base });
-  assert.equal(v.pass, false);                       // test "passed" but erased the patch → refused
-  assert.match(v.detail.testOutput, /reverted the candidate/);
+  assert.equal(v.pass, false);                       // erased the untracked patch → tree changed → refused
+  assert.match(v.detail.testOutput, /changed the candidate tree/);
   fs.rmSync(d, { recursive: true, force: true });
 });
 
-test('verifyCard still passes when the test writes artifacts without reverting (no false reject)', async () => {
+test('verifyCard refuses a test that CORRUPTS the candidate in place (round 11 High)', async () => {
   const d = tmpGit();
   const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
-  fs.writeFileSync(path.join(d, 'feature.js'), 'export const f = () => 1;');   // real candidate (new file)
+  fs.writeFileSync(path.join(d, 'feature.js'), 'export const good = () => 42;');
   const card = {
     goal: 'add a feature',
-    acceptanceArgv: ['node', '-e', 'require("fs").writeFileSync("coverage.out","ok"); process.exit(0)'],   // writes an artifact, reverts nothing
+    acceptanceArgv: ['node', '-e', 'require("fs").writeFileSync("feature.js","garbage"); process.exit(0)'],   // rewrites content, same path
     acceptanceTimeoutSec: 20,
   };
   const v = await verifyCard(card, d, { baseRef: base });
-  assert.equal(v.pass, true);
+  assert.equal(v.pass, false);                       // content changed → different tree hash → refused
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('verifyCard passes an untracked additive candidate when the test writes only GITIGNORED artifacts', async () => {
+  const d = tmpGit();
+  fs.writeFileSync(path.join(d, '.gitignore'), 'coverage.out\n');   // artifacts are ignored, as in a real repo
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('add', '-A'); g('commit', '-q', '-m', 'add gitignore');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  fs.writeFileSync(path.join(d, 'feature.js'), 'export const f = () => 1;');   // untracked candidate
+  const card = {
+    goal: 'add a feature',
+    acceptanceArgv: ['node', '-e', 'require("fs").writeFileSync("coverage.out","ok"); process.exit(0)'],   // ignored artifact → no tree change
+    acceptanceTimeoutSec: 20,
+  };
+  const v = await verifyCard(card, d, { baseRef: base });
+  assert.equal(v.pass, true);   // the candidate survived; the ignored artifact didn't count
   fs.rmSync(d, { recursive: true, force: true });
 });

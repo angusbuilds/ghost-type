@@ -45,31 +45,34 @@ export function runAcceptance(argv, cwd, timeoutSec, env = buildSessionEnv([], p
 const gitOut = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
 export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandbox = false, acceptanceTimeoutSec } = {}) {
   const ref = baseRef || 'HEAD';
-  // Freeze the SET of candidate-changed files BEFORE running the (agent-modifiable) test. A test
-  // rigged to erase its own bad changes (`git reset --hard`, `git checkout base -- .`) would
-  // otherwise leave an empty diff that sails through the deletion guard and ships as done (round 10 High).
-  const changed = (out) => new Set(String(out).trim().split('\n').filter(Boolean));
-  const before = changed(git(clonePath, 'diff', '--name-only', ref, '--'));
+  // FREEZE the full candidate tree — tracked mods AND untracked new files (git add -A respects
+  // .gitignore, so build artifacts don't count) — BEFORE the agent-modifiable test runs. write-tree
+  // hashes CONTENT, so any later change is visible: erasing an untracked file, corrupting content
+  // in place, or committing a different tree all change the hash (round 11: the round-10 filename-
+  // only check missed untracked deletion + corruption + commit-over).
+  const freeze = () => { git(clonePath, 'add', '-A'); return git(clonePath, 'write-tree').trim(); };
+  let treeBefore = null;
+  try { treeBefore = freeze(); } catch { /* non-git clone → skip the freeze, guards below still run */ }
   // acceptanceTimeoutSec (from the governor's remaining time) caps the test so it can't run its
   // full card timeout past the nightly deadline (round 8 Medium).
   const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);
   if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead || 'test failed' } };
-  // Any candidate file that NO LONGER differs from base was REVERTED by the test — refuse. (A
-  // test that merely writes new artifacts grows the set, so this only fires on a real revert.)
-  const after = changed(git(clonePath, 'diff', '--name-only', ref, '--'));
-  const reverted = [...before].filter(f => !after.has(f));
-  if (before.size > 0 && reverted.length) {
-    return { pass: false, detail: { testOutput: `acceptance reverted the candidate (${reverted.slice(0, 3).join(', ')}${reverted.length > 3 ? '…' : ''}) — refusing: a test must not rewrite the patch` } };
+  // A rigged test that erased/rewrote its own changes to fake a pass now shows a different tree.
+  if (treeBefore) {
+    const treeAfter = freeze();
+    if (treeBefore !== treeAfter) {
+      return { pass: false, detail: { testOutput: 'acceptance changed the candidate tree — refusing: a test must not rewrite or erase the patch' } };
+    }
   }
-  const stat = git(clonePath, 'diff', '--shortstat', ref, '--').trim();
+  // Destructive-change guard on the STAGED diff, which now includes the untracked new files too
+  // (so a build goal that only adds new files isn't misread as net-negative).
+  const stat = git(clonePath, 'diff', '--cached', '--shortstat', ref, '--').trim();
   if (suspiciousDeletion(card.goal, stat)) {
     return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
   }
-  // Deeper per-file / deleted-file inspection catches gutting a file under a "fix" goal and
-  // padded net-positive diffs that delete a test (round 6 #3).
   const reason = destructiveDiffReason(card.goal,
-    git(clonePath, 'diff', '--numstat', ref, '--').trim(),
-    git(clonePath, 'diff', '--name-status', ref, '--').trim());
+    git(clonePath, 'diff', '--cached', '--numstat', ref, '--').trim(),
+    git(clonePath, 'diff', '--cached', '--name-status', ref, '--').trim());
   if (reason) return { pass: false, detail: { testOutput: `test passed but the change looks destructive — refusing (${reason})` } };
   return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' } };
 }
@@ -123,7 +126,7 @@ const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test[_-][^/]+\.[a-z]+$|[.
 export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   const g = String(goal);
   const hasDeletion = DELETION_GOAL.test(g);
-  const hasBuildOrFix = BUILD_GOAL.test(g) || /\b(fix(ed|es|ing)?|repair|resolve|correct|patch|debug)\b/i.test(g);
+  const hasBuildOrFix = BUILD_GOAL.test(g) || /\b(fix(ed|es|ing)?|repair|resolve|correct|patch|debug|refactor|rework|update|improve)\b/i.test(g);
   // ONLY a pure deletion goal (deletion words, no build/fix intent) disables the size/binary
   // guards — a MIXED goal like "fix parser and remove a debug log" must not (round 9/10 High).
   const pureDeletionGoal = hasDeletion && !hasBuildOrFix;
@@ -132,7 +135,7 @@ export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   // Rejects "fix the failing parser test" (no deletion word) and "remove debug logging and fix
   // parser tests" (a clause break separates them), while allowing "remove the flaky parser test"
   // (round 9/10 High).
-  const testRemovalIntent = /\b(delete|remove|drop|prune|strip|deprecate)\b(?:(?!\b(?:and|but|then|or|also|plus)\b)[^.;,\n]){0,40}\b(tests?|specs?)\b/i.test(g);
+  const testRemovalIntent = /\b(delete|remove|drop|prune|strip|deprecate)\b(?:(?!\b(?:and|but|then|or|also|plus|while|when|so|as|to|for|after|before)\b)[^.;,\n]){0,40}\b(tests?|specs?)\b/i.test(g);
   // Map each file to its numstat so we can tell a binary deletion (`-\t-`) from a text one.
   const sizes = {};
   for (const l of String(numstat).split('\n')) {
