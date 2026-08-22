@@ -167,7 +167,12 @@ export function runAcceptance(argv, cwd, timeoutSec, env = buildSessionEnv([], p
 // changes too (round 4 #1); `git` is injectable for tests.
 const gitOut = (cwd, ...a) => execFileSync('git', a, { cwd, maxBuffer: MAXBUF }).toString();
 export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandbox = false, acceptanceTimeoutSec } = {}) {
-  const ref = baseRef || 'HEAD';
+  // Pin the base to an IMMUTABLE commit OID up front. If it stayed a movable ref ('HEAD'), an
+  // acceptance test that COMMITS could move HEAD and shift the destructive-diff / neuter baseline so a
+  // deletion or gutting compares as "no change" and ships (round 31 verify-flow audit #3). Resolved
+  // BEFORE acceptance, so the guards always compare against the pre-acceptance base a test can't move.
+  let ref = baseRef || 'HEAD';
+  try { ref = git(clonePath, 'rev-parse', ref).trim() || ref; } catch { /* keep the given ref if unresolvable */ }
   // FREEZE the full candidate tree — tracked mods AND untracked new files (git add -A respects
   // .gitignore, so build artifacts don't count) — BEFORE the agent-modifiable test runs. write-tree
   // hashes CONTENT, so any later change is visible: erasing an untracked file, corrupting content

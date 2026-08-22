@@ -749,3 +749,21 @@ test('verifyCard on a repo WITHOUT package.json ships cleanly with NO git stderr
   assert.doesNotMatch(stderr, /fatal: path 'package\.json'/);                // no stderr leak from the neuter read
   fs.rmSync(d, { recursive: true, force: true });
 });
+
+test('an acceptance test that MOVES HEAD cannot shift the destructive-diff baseline to slip a deletion (round 31 verify-flow audit #3)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-refpin-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d }).toString();
+  g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'core.test.js'), '// real tests\n' + 'assert(true);\n'.repeat(60));
+  fs.writeFileSync(path.join(d, 'index.js'), 'export const v=1;\n');
+  g('add', '-A'); g('commit', '-q', '-m', 'base');
+  // candidate deletes the test file — a destructive change a build goal must refuse
+  fs.rmSync(path.join(d, 'core.test.js'));
+  fs.writeFileSync(path.join(d, 'index.js'), 'export const v=2;\n');
+  // acceptance passes AND commits, moving HEAD; called WITHOUT baseRef so ref would default to HEAD
+  const card = { goal: 'add a feature', acceptanceArgv: ['sh', '-c', 'git add -A && git -c core.hooksPath=/dev/null commit -q -m sneaky && exit 0'], acceptanceTimeoutSec: 30 };
+  const v = await verifyCard(card, d, {});
+  assert.equal(v.pass, false, 'the deletion must be refused even though the test moved HEAD');
+  assert.match(v.detail.testOutput, /refus|destructive|net-negative|test file/i);   // a destructive-diff guard fired
+  fs.rmSync(d, { recursive: true, force: true });
+});
