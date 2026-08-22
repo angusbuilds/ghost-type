@@ -23,7 +23,7 @@ const EVAL_PROBE = /reply with (exactly|only)|respond with only|CLAUDE_OK|how ma
 // Ghost Type's OWN generated text that lands in the transcript as a "user" row — its writer/driver
 // prompts, a compaction continuation-summary, or an injected task/system notification. None of it is
 // the owner typing, so it must not pollute the learned voice (round 28 #9).
-const GHOST_OWN = /WRITE EXACTLY IN THIS VOICE|ALREADY TRIED \(do not repeat|DIAGNOSIS OF LAST FAILURE|This session is being continued from a previous conversation|\[SYSTEM NOTIFICATION|automated background-task event|Caveat: The messages below were generated/i;
+const GHOST_OWN = /WRITE EXACTLY IN THIS VOICE|ALREADY TRIED \(do not repeat|DIAGNOSIS OF LAST FAILURE|A coding attempt failed|^Goal set:|This session is being continued from a previous conversation|\[SYSTEM NOTIFICATION|automated background-task event|Caveat: The messages below were generated|\b(FEATURE|PROOF|SECRET)\.txt\b/i;
 
 // Return the real typed text, or null if this content is command/tool/meta/eval/Ghost-own noise.
 export function cleanPromptText(s) {
