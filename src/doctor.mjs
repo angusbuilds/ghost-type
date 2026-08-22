@@ -1,7 +1,7 @@
 // src/doctor.mjs
 // Environment self-check — what a real deployment needs verified before it trusts an
 // unattended night. Pure logic (the probes are injected) so it's testable offline.
-export function checkEnv({ has, claudeVersion, onBattery, freeDiskGB, dcgPresent } = {}) {
+export function checkEnv({ has, claudeVersion, onBattery, freeDiskGB, dcgPresent, quarantine } = {}) {
   const checks = [];
   const req = (name, ok, detail, fatal = false) => checks.push({ name, ok: Boolean(ok), detail, fatal });
 
@@ -19,6 +19,20 @@ export function checkEnv({ has, claudeVersion, onBattery, freeDiskGB, dcgPresent
   const battery = onBattery();
   req('AC power', battery === false,
     battery === false ? 'plugged in' : battery === true ? 'on battery — the machine will sleep' : 'power state unreadable', false);
+
+  // Crashed clones are quarantined and preserved forever (round 7 High#2 — never auto-delete
+  // possibly-only-copy work), so a backlog is invisible until it eats the 20GB disk floor and
+  // silently blocks arming. Surface it here (advisory, never fatal) so the owner clears reviewed
+  // ones. Only added when a probe is injected — absent probe leaves the check set untouched.
+  if (quarantine) {
+    const q = quarantine();
+    const detail = q == null
+      ? 'could not read the work dir'
+      : q.count === 0
+        ? 'no crashed clones held'
+        : `${q.count} crashed clone${q.count === 1 ? '' : 's'} preserved${q.sizeMB != null ? ` (~${q.sizeMB}MB)` : ''} — review, then clear to reclaim disk`;
+    req('quarantine', q != null && q.count === 0, detail, false);
+  }
 
   const fatalFail = checks.some(c => c.fatal && !c.ok);
   const ready = checks.every(c => c.ok || !c.fatal);

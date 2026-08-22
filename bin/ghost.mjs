@@ -32,7 +32,7 @@ import { recordLineage } from '../src/lineage.mjs';
 import { selectableSessions } from '../src/sessions.mjs';
 import { loadConfig, nightDeadlineMs } from '../src/config.mjs';
 import { checkEnv, renderDoctor } from '../src/doctor.mjs';
-import { realOnBattery, realFreeDiskGB } from '../src/daemon.mjs';
+import { realOnBattery, realFreeDiskGB, realQuarantineBacklog } from '../src/daemon.mjs';
 import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
 import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
 
@@ -323,7 +323,7 @@ async function main() {
       const has = (bin) => { try { execFileSync('/bin/sh', ['-c', `command -v ${bin}`], { stdio: 'ignore' }); return true; } catch { return false; } };
       let claudeVersion = ''; try { claudeVersion = execFileSync(CLAUDE_BIN, ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().match(/[\d.]+/)?.[0] || ''; } catch { /* absent */ }
       const dcgPresent = has('dcg') || fs.existsSync(`${HOME}/.claude/hooks/guard.py`);
-      const result = checkEnv({ has, claudeVersion, onBattery: realOnBattery, freeDiskGB: realFreeDiskGB, dcgPresent });
+      const result = checkEnv({ has, claudeVersion, onBattery: realOnBattery, freeDiskGB: realFreeDiskGB, dcgPresent, quarantine: realQuarantineBacklog });
       console.log('\n👻 Ghost Type — environment check\n');
       console.log(renderDoctor(result));
       console.log('');

@@ -134,9 +134,13 @@ parent dir, gitlink; nested untracked repos; non-ignored empty dirs git can't st
   error string; the situation-specific exemplar is never dropped.
 - **Nothing is silently lost** — proposal cards write a real `PLAN.md`; cards unstarted after a
   governor trip are reported `skipped`; a same-day rerun ships a sibling branch, not a lost non-ff.
+- **The crash backlog is visible** — crashed clones are quarantined and preserved forever (never
+  auto-deleted — they may hold the only copy of a night's work), which meant they piled up unseen
+  until the 20GB disk floor silently blocked arming. `ghost doctor` now reports the quarantine
+  count and footprint so the owner can review and clear them — advisory, never fatal.
 
 ### Proof
-- 300 offline unit tests (`node --test`), zero runtime dependencies.
+- 304 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main

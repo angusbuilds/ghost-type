@@ -38,6 +38,24 @@ export function realFreeDiskGB(dir = WORK_DIR) {
 }
 function safeList(dir) { try { return fs.readdirSync(dir); } catch { return []; } }
 
+// Count (and roughly size) the `.crashed-*` clones quarantined in the work dir. These are
+// preserved forever by design (clone.mjs never deletes crashed work), so `ghost doctor` reports
+// the backlog and its disk footprint — the owner reviews and clears them by hand. Size is a
+// best-effort `du`; a du failure still yields the actionable count. null on an unreadable dir.
+export function realQuarantineBacklog(dir = WORK_DIR) {
+  try {
+    const names = safeList(dir).filter(n => n.includes('.crashed-'));
+    if (names.length === 0) return { count: 0, sizeMB: 0 };
+    let sizeMB = null;
+    try {
+      const out = execFileSync('du', ['-ck', ...names.map(n => path.join(dir, n))]).toString().trim().split('\n');
+      const kb = Number(out[out.length - 1].split(/\s+/)[0]);   // grand-total row from `du -c`
+      if (Number.isFinite(kb)) sizeMB = Math.round(kb / 1024);
+    } catch { /* size is best-effort — the count is the actionable part */ }
+    return { count: names.length, sizeMB };
+  } catch { return null; }
+}
+
 // Refuse to arm on battery, low disk, OR an unknown probe result — the silent-death causes.
 export function armChecks({ onBattery = realOnBattery, freeDiskGB = realFreeDiskGB } = {}) {
   const warnings = [];
