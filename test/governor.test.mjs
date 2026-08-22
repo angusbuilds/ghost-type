@@ -71,3 +71,27 @@ test('remainingUsd is Infinity when no dollar cap is set (round 6 #8)', () => {
   const g = new Governor(caps);   // no maxCostUsd → Infinity
   assert.equal(g.remainingUsd(), Infinity);
 });
+
+test('the constructor FAILS CLOSED on an invalid required cap — a kill-switch must not silently fail open (round 31 audit)', () => {
+  const good = { maxTokensNight: 1000, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 3 };
+  for (const bad of [undefined, NaN, 0, -1, '1000']) {
+    assert.throws(() => new Governor({ ...good, maxTokensNight: bad }), /maxTokensNight/, `maxTokensNight=${bad} should throw`);
+    assert.throws(() => new Governor({ ...good, maxConsecErrors: bad }), /maxConsecErrors/, `maxConsecErrors=${bad} should throw`);
+  }
+  // the intentionally-optional caps still work: omitted maxCostUsd → Infinity, null deadline → unlimited
+  assert.doesNotThrow(() => new Governor(good));
+  assert.doesNotThrow(() => new Governor({ ...good, nightDeadlineMs: null }));
+});
+
+test('usageTokens ignores malformed buckets (string/NaN/negative) so the token cap cannot be poisoned or reduced (round 31 audit)', () => {
+  assert.equal(usageTokens({ input_tokens: '5', output_tokens: 3 }), 8);    // numeric string coerced, NOT concatenated to "53"
+  assert.equal(usageTokens({ input_tokens: NaN, output_tokens: 5 }), 5);    // NaN → 0
+  assert.equal(usageTokens({ input_tokens: -100, output_tokens: 5 }), 5);   // negative → 0 (can't shrink the count)
+  assert.equal(typeof usageTokens({ input_tokens: 'abc' }), 'number');      // never a string
+});
+
+test('addCost ignores negative/NaN/string/Infinity so the dollar cap cannot be reduced or poisoned (round 31 audit)', () => {
+  const g = new Governor({ maxTokensNight: 1e9, maxCostUsd: 10, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 3 });
+  g.addCost(5); g.addCost(-100); g.addCost(NaN); g.addCost('9'); g.addCost(Infinity);
+  assert.equal(g.costUsd, 5);   // only the single valid positive number counted
+});
