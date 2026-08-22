@@ -108,6 +108,11 @@ export async function runCard(card, deps) {
     iterations += 1;
     const eng = meter(await runEngine({ cwd: clonePath, prompt, card, ...boundCall(card.maxBudgetUsd ?? Infinity) }));
     const outcome = classifyOutcome({ exitCode: eng.exitCode, result: eng.result, text: eng.text, nowMs: now() });
+    // An engineFailed result (nonzero exit or is_error) that classifyOutcome couldn't route to a
+    // specific failure (a nonzero exit carrying a non-is_error result → 'stalled') must NOT fall
+    // through to verify and ship — force 'errored', consistent with engineFailed gating every writer
+    // path (round 31 spine audit #1). Rate-limit/network keep their own retry/backoff + reset handling.
+    if (engineFailed(eng) && outcome.state !== 'rate-limited' && outcome.state !== 'network') outcome.state = 'errored';
 
     if (outcome.state === 'rate-limited') {
       iterations -= 1;                       // not a real attempt — don't spend the budget
@@ -154,7 +159,7 @@ export async function runCard(card, deps) {
     const claim = classifyClaim({ claimText: eng.text, verifyPass: v.pass });
     if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, tests failed' }); }
 
-    if (v.pass) {
+    if (v.pass === true) {   // strict: only a literal pass ships — never a truthy non-boolean (round 31 spine audit #2)
       governor?.noteOk();
       // Ship the EXACT verified tree (v.tree) via hook-free plumbing, not a fresh checkout that a
       // planted post-checkout hook could mutate (round 13). baseRef is the commit's parent. The

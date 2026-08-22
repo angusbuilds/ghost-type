@@ -235,3 +235,24 @@ test('M1: records a false-done when the agent claims done but verify fails', asy
   }));
   assert.ok(r.falseDoneCount >= 1);
 });
+
+test('an engineFailed result (nonzero exit) NEVER ships even if acceptance would pass (round 31 spine audit #1)', async () => {
+  // exitCode 1 + a structured result that ISN'T is_error → classifyOutcome returns 'stalled', which
+  // used to fall through to verify and ship. engineFailed(eng) is true, so it must NOT ship — every
+  // writer path already refuses such results; the main ship path must be consistent.
+  const r = await runCard({ ...card, maxIterations: 2 }, deps({
+    runEngine: async () => ({ exitCode: 1, result: { subtype: 'success', is_error: false }, usage: {}, text: 'partial' }),
+    verify: async () => ({ pass: true, detail: { testOutput: 'ok' } }),   // acceptance would pass...
+  }));
+  assert.notEqual(r.outcome, 'shipped');   // ...but an engine-failed attempt is not trustworthy
+  assert.equal(r.mergeReady, false);
+  assert.match(r.whyLine, /error/i);
+});
+
+test('the ship gate requires v.pass === true, not merely truthy (round 31 spine audit #2)', async () => {
+  const r = await runCard({ ...card, maxIterations: 1 }, deps({
+    verify: async () => ({ pass: 'yes', detail: { testOutput: 'ok' } }),   // truthy but NOT === true
+  }));
+  assert.notEqual(r.outcome, 'shipped');   // a malformed/non-boolean pass must not ship the most critical gate
+  assert.equal(r.mergeReady, false);
+});
