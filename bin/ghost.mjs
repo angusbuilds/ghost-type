@@ -16,7 +16,7 @@ import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reapClone, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
-import { runCardSafely } from '../src/spine.mjs';
+import { runCardSafely, runProposal } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
@@ -242,10 +242,22 @@ async function main() {
           const post = gov.check(Date.now());
           if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
         }
-        // Proposal-only cards can't be graded unattended — surface them in the report as
-        // skipped-with-reason instead of silently dropping them (round 4 #7).
+        // Proposal cards can't be graded unattended (no runner), but instead of being dropped they have
+        // the agent WRITE a plan (PLAN.md on the branch) the owner reviews in the morning (round 28 #13).
         for (const c of cards.filter(c => !isCodingCard(c))) {
-          results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false, whyLine: c.reason || 'proposal-only — no test runner to verify against', branch: c.branch, iterations: 0, promptsWritten: [], testOutput: '' });
+          if (interrupted || !gov.check(Date.now()).ok) {
+            results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false, whyLine: 'not started — ' + (interrupted ? 'interrupted' : (gov.check(Date.now()).trip || 'stopped')), branch: c.branch, iterations: 0, promptsWritten: [], testOutput: '' });
+            continue;
+          }
+          console.log(`\n📝 ${c.project}: proposing a plan for "${c.goal}"`);
+          const deps = cardDeps(c, voice); deps.governor = gov;
+          deps.writePlan = (cp, content) => fs.writeFileSync(path.join(cp, 'PLAN.md'), content);
+          const r = await runProposal(c, deps);
+          if (r.outcome === 'proposed' && r.commitOid) {
+            try { fetchBranchBack(c.repoPath, path.join(WORK_DIR, c.branch.replace(/[^\w.-]/g, '_')), c.branch, r.commitOid); }
+            catch (e) { r.whyLine = `plan written but couldn't fetch the branch back: ${String(e.message).split('\n')[0]}`; }
+          }
+          results.push(r);
         }
       } finally {
         if (hb) clearInterval(hb);

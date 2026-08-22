@@ -12,7 +12,7 @@ export function renderReport(night) {
   const strip = [
     `# Ghost Type — ${night.date}`,
     '',
-    `**${night.cards.filter(c => c.mergeReady).length} shipped · ${night.cards.filter(c => c.outcome === 'parked').length} parked · ${night.cards.filter(c => c.outcome === 'skipped').length} skipped · ${night.tokens} tokens · $${night.costUsd.toFixed(2)}**`,
+    `**${night.cards.filter(c => c.mergeReady).length} shipped · ${night.cards.filter(c => c.outcome === 'proposed').length} proposed · ${night.cards.filter(c => c.outcome === 'parked').length} parked · ${night.cards.filter(c => c.outcome === 'skipped').length} skipped · ${night.tokens} tokens · $${night.costUsd.toFixed(2)}**`,
     night.tripReason ? `\n> stopped early: ${cell(night.tripReason)}` : '',
     '',
     '| project | merge-ready | why |',

@@ -202,6 +202,32 @@ export async function runCardSafely(card, deps) {
   }
 }
 
+// A proposal card (no test runner → can't be graded unattended) instead has the agent PROPOSE a plan
+// the owner reviews in the morning, rather than being silently skipped. A bounded READ-ONLY engine
+// call produces the plan text; we persist it as PLAN.md on the card's branch. It never modifies real
+// files, meters into the governor, and is reported 'proposed' (not merge-ready) (round 28 #13).
+export async function runProposal(card, deps) {
+  const { makeClone, headRef = () => 'HEAD', runEngine, writePlan, commit, governor = null, now = () => 0 } = deps;
+  const skip = (why) => ({ project: card.project, goal: card.goal, outcome: 'skipped', mergeReady: false, whyLine: why, branch: card.branch, iterations: 0, promptsWritten: [], testOutput: '', ledger: [], falseDoneCount: 0 });
+  try {
+    if (governor) { const c = governor.check(now()); if (!c.ok) return skip(`governor: ${c.trip}`); }
+    const clonePath = makeClone(card.repoPath, card.branch.replace(/[^\w.-]/g, '_'));
+    headRef(clonePath);
+    const rem$ = governor?.remainingUsd?.();
+    const r = await runEngine({ cwd: clonePath, writer: true,   // writer = READ-ONLY tools/sandbox, tiny budget
+      prompt: `Propose a concrete, step-by-step plan to accomplish this task in this repository. Read whatever you need, but make NO changes; output ONLY a markdown plan, no preamble.\n\nTASK: ${card.goal}`,
+      maxBudgetUsd: Number.isFinite(rem$) ? Math.min(1, rem$) : 1 });
+    if (governor) { if (r?.usage) governor.addUsage(r.usage); const cost = r?.costUsd ?? r?.result?.total_cost_usd; if (cost) governor.addCost(cost); }
+    const plan = (r?.text || '').trim();
+    if (!plan || (r?.exitCode ?? 0) !== 0) return skip('proposal engine call failed — no plan produced');
+    writePlan(clonePath, `# Plan — ${card.goal}\n\n${plan}\n`);
+    const commitOid = commit(clonePath, card.branch, {});   // non-tree path: adds PLAN.md + commits
+    return { project: card.project, goal: card.goal, outcome: 'proposed', mergeReady: false,
+      whyLine: 'plan written to PLAN.md — review, then queue it as a task', branch: card.branch,
+      commitOid, iterations: 0, promptsWritten: [plan.slice(0, 400)], testOutput: '', ledger: [], falseDoneCount: 0 };
+  } catch (e) { return skip(`proposal errored: ${String(e?.message || e).split('\n')[0]}`); }
+}
+
 export async function runNight(cards, deps) {
   const results = [];
   const gov = deps.governor;

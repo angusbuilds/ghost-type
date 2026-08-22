@@ -1,8 +1,37 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard, runCardSafely, runNight } from '../src/spine.mjs';
+import { runCard, runCardSafely, runNight, runProposal } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
+
+test('runProposal has the agent write PLAN.md and commits it to the branch, reported as proposed (round 28 #13)', async () => {
+  let planContent = null, committedBranch = null;
+  const r = await runProposal({ project: 'notes', repoPath: '/d/notes', goal: 'add dark mode', branch: 'ghost/x' }, {
+    makeClone: () => '/tmp/clone',
+    runEngine: async ({ writer }) => { assert.equal(writer, true); return { exitCode: 0, result: { subtype: 'success' }, usage: { input_tokens: 10, output_tokens: 20 }, text: '1. add a toggle\n2. persist the choice' }; },
+    writePlan: (cp, content) => { planContent = content; },
+    commit: (cp, branch) => { committedBranch = branch; return 'abc123'; },
+  });
+  assert.equal(r.outcome, 'proposed');
+  assert.equal(r.mergeReady, false);
+  assert.equal(r.commitOid, 'abc123');
+  assert.equal(committedBranch, 'ghost/x');
+  assert.match(planContent, /# Plan — add dark mode/);
+  assert.match(planContent, /add a toggle/);
+});
+
+test('runProposal skips WITHOUT writing/committing when the plan engine call fails (round 28 #13)', async () => {
+  let wrote = false;
+  const r = await runProposal({ project: 'notes', repoPath: '/d/notes', goal: 'g', branch: 'ghost/x' }, {
+    makeClone: () => '/tmp/clone',
+    runEngine: async () => ({ exitCode: 1, result: null, text: 'fetch failed' }),
+    writePlan: () => { wrote = true; },
+    commit: () => 'nope',
+  });
+  assert.equal(r.outcome, 'skipped');
+  assert.equal(wrote, false);            // no PLAN.md written on a failed call
+  assert.match(r.whyLine, /failed/);
+});
 
 const card = {
   project: 'demo', repoPath: '/tmp/none', goal: 'pass the test',
