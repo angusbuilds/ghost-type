@@ -78,3 +78,34 @@ test('nightDeadlineMs returns the next occurrence of the configured hour', () =>
   assert.equal(d.getHours(), 7);
   assert.ok(ms > now);                              // tomorrow 7am
 });
+
+test('NO adversarial config file yields an unsafe merged value — the governor never sees bad caps (round 31)', () => {
+  // loadConfig is the governor's upstream guard: every rejected field must fall back to a safe
+  // default no matter how hostile the file. Covers raw/non-object/malformed inputs the JSON-only
+  // helper can't express, plus a prototype-pollution attempt.
+  const tmpRaw = (content) => {
+    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gt-cfgraw-')), 'config.json');
+    fs.writeFileSync(f, content);
+    return f;
+  };
+  const safe = (c) =>
+    num(c.maxTokensNight) && c.maxTokensNight > 0 && num(c.maxCostUsd) && c.maxCostUsd > 0 &&
+    Number.isInteger(c.nightDeadlineHour) && c.nightDeadlineHour >= 0 && c.nightDeadlineHour <= 23 &&
+    Number.isInteger(c.maxConsecErrors) && c.maxConsecErrors >= 1 && c.humanIdleThreshold >= 5 &&
+    Number.isInteger(c.minStable) && c.minStable >= 2 &&
+    (c.defaultEngine === 'claude' || c.defaultEngine === 'codex') && typeof c.sandbox === 'boolean';
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+
+  const raws = ['{bad json,,,', '', '[1,2,3]', 'null', '"str"', '42',
+    '{"__proto__":{"polluted":true},"maxCards":5}'];
+  for (const r of raws) assert.ok(safe(loadConfig(tmpRaw(r))), `unsafe from raw: ${r}`);
+
+  const objs = [
+    { maxTokensNight: -1, maxCostUsd: -5, maxConsecErrors: -3 },
+    { maxTokensNight: '999', nightDeadlineHour: 999, minStable: 1, humanIdleThreshold: 0 },
+    { maxConsecErrors: 2.5, defaultEngine: 'gpt4', sandbox: 'true', maxTokensNight: { evil: 1 } },
+  ];
+  for (const o of objs) assert.ok(safe(loadConfig(tmpCfg(o))), `unsafe from ${JSON.stringify(o)}`);
+
+  assert.notEqual(({}).polluted, true);   // the __proto__ key never pollutes Object.prototype
+});
