@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<!--
+  Ghost Type — scheduled overnight run.
+
+  Runs `ghost on` nightly (no send-off line → the planner queues a "continue the current work"
+  card per runnable project). It arms, works in isolated clones until each acceptance test
+  passes, writes the morning report, and disarms. It REFUSES to arm on battery or low disk, so
+  a sleeping/unplugged laptop is a no-op, not a runaway.
+
+  INSTALL (edit the two absolute paths first — launchd gets a minimal PATH, so absolutes only):
+    1. Replace __NODE__  with the output of `command -v node`   (e.g. /opt/homebrew/bin/node)
+    2. Replace __GHOST__ with the absolute path to bin/ghost.mjs (e.g. /Users/you/dev/ghost-type/bin/ghost.mjs)
+    3. Replace __HOME__  with your home dir                      (e.g. /Users/you)
+    4. cp deploy/com.ghosttype.night.plist ~/Library/LaunchAgents/
+    5. launchctl load ~/Library/LaunchAgents/com.ghosttype.night.plist
+  UNINSTALL: launchctl unload ~/Library/LaunchAgents/com.ghosttype.night.plist
+
+  Change StartCalendarInterval Hour/Minute to pick the start time. The 07:00 hard-stop is the
+  `nightDeadlineHour` config knob, not this schedule.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ghosttype.night</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__GHOST__</string>
+    <string>on</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>22</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+
+  <!-- launchd hands a bare PATH; give git/node/claude a chance to resolve. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.ghosttype/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.ghosttype/launchd.err.log</string>
+
+  <!-- One run per fire; never auto-restart a finished night. -->
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>

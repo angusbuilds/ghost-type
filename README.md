@@ -166,6 +166,11 @@ Tunables (token cap, hard-stop hour, thresholds) live in `~/.ghosttype/config.js
 see [`examples/config.example.json`](examples/config.example.json). The native menu-bar app
 (`app/GhostType`) wraps all of this: `cd app/GhostType && swift build -c release`.
 
+To run it on a schedule (nightly, unattended), install the launchd agent in
+[`deploy/com.ghosttype.night.plist`](deploy/com.ghosttype.night.plist) — edit the absolute
+paths, `cp` it into `~/Library/LaunchAgents/`, and `launchctl load` it. It refuses to arm on
+battery or low disk, so a sleeping laptop is a no-op.
+
 ## Status
 
 ```

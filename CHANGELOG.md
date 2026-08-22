@@ -16,7 +16,8 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
 - **M2 voice** — `ghost learn` distills the owner's real prompting voice from
   `~/.claude` transcripts (lowercase, no `!`, keeps typos, blunt-verdict redirects).
 - **M3 daemon + CLI** — `ghost scan/learn/on/off/status/queue/report`, planner, dossiers,
-  battery/disk arm-checks, caffeinate + heartbeat lifecycle, launchd plist.
+  battery/disk arm-checks, caffeinate + heartbeat lifecycle, launchd agent
+  (`deploy/com.ghosttype.night.plist`) for scheduled overnight runs.
 - **M4 report** — theme-aware HTML report, morning push notification, prompt lineage.
 
 ### Engines & UX
