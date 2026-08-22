@@ -39,6 +39,23 @@ test('shield hit on transcript throws a tagged error (caller parks the card)', a
   }), /SHIELD_HIT/);
 });
 
+test('writeNextPrompt does NOT inject a rate-limit message as the next prompt — falls back to the goal (round 28 #3-variant)', async () => {
+  // Claude reports a usage limit as subtype:success + is_error:true, exit 0 — an exitCode-only check
+  // would return this text as the prompt to the coding agent.
+  const engine = async () => ({ exitCode: 0, result: { subtype: 'success', is_error: true }, text: "You've hit your usage limit. Try again at 6pm." });
+  const p = await writeNextPrompt({
+    card: { goal: 'fix the failing parser test' }, diffTail: '', testTail: 'fail', notesTail: '', transcriptTail: '',
+    voiceProfile: 'terse', exemplars: [], failure: null, engine,
+  });
+  assert.equal(p, 'fix the failing parser test');   // restated the goal, NOT the limit message
+});
+
+test('diagnoseFailure drops a structured is_error result instead of using it as the diagnosis (round 28 #3-variant)', async () => {
+  const engine = async () => ({ exitCode: 0, result: { subtype: 'success', is_error: true }, text: "You've hit your usage limit." });
+  const d = await diagnoseFailure({ goal: 'g', rawTrace: 'boom', engine });
+  assert.equal(d, '');   // no diagnosis rather than the limit text
+});
+
 test('diagnoseFailure asks the model why it failed and returns the diagnosis', async () => {
   let seen = '';
   const engine = async ({ prompt }) => { seen = prompt; return { text: 'the lexer drops the last token' }; };
