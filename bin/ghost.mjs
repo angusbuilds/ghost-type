@@ -170,6 +170,11 @@ async function main() {
       console.log(`\n👻 planned queue (${cards.length}):`);
       for (const c of cards) console.log(`  - [${isCodingCard(c) ? 'code' : 'proposal'}] ${c.project}: ${c.goal}`);
       if (paused.length) console.log(`  paused (review backlog): ${paused.join(', ')}`);
+      // The clone is built from committed HEAD, so a dirty source's uncommitted work is not included.
+      // Surface it rather than refuse (refusing every dirty repo would block actively-developed projects,
+      // which is the whole use case) — the ghost's branch is HEAD-based and the morning diff shows it (round 21 #4).
+      const dirtyPlanned = [...new Set(dossiers.filter(d => d.dirty).map(d => d.name))].filter(n => cards.some(c => c.project === n));
+      if (dirtyPlanned.length) console.log(`  ⚠ uncommitted changes in ${dirtyPlanned.join(', ')} — the ghost builds from HEAD; that WIP is NOT included`);
 
       // M3: dry-run touches NO persistent state — return before arming or writing the queue.
       if (dryRun) { console.log('\n(dry-run — planned only, nothing armed or executed)\n'); break; }

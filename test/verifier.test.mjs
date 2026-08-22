@@ -139,6 +139,37 @@ test('verifyCard REFUSES an added/changed submodule gitlink — its nested commi
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+test('sterileTree REFUSES an untracked nested git repository — its content would otherwise be silently dropped (round 21 #1)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nested-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.js'), '1'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const nested = path.join(d, 'vendored'); fs.mkdirSync(nested);      // an untracked NESTED repo with real content
+  execFileSync('git', ['init', '-q'], { cwd: nested });
+  fs.writeFileSync(path.join(nested, 'lib.js'), 'nested content ls-files --others reports as a dir');
+  assert.throws(() => sterileTree(d), /nested git repository/i);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('patchApplied compares the sterile tree to base, seeing a candidate that status.showUntrackedFiles=no would hide (round 21 #5)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-pa5-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.js'), '1'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  assert.equal(patchApplied(d, base), false);                        // unchanged worktree → no patch
+  g('config', 'status.showUntrackedFiles', 'no');                    // config that would blind `git status`
+  fs.writeFileSync(path.join(d, 'feature.js'), 'a new untracked candidate the status would hide');
+  assert.equal(patchApplied(d, base), true);                         // sterile-tree vs base-tree still sees it
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('hasIgnoredState is true when a populated submodule exists (its ignored deps are invisible to outer status) (round 21 #2)', () => {
+  const { main } = mkSubmoduleRepo('gt-subig-');                     // main holds a populated submodule 'sub'
+  assert.equal(hasIgnoredState(main), true);                         // conservatively preserved, not reaped
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
 test('verifyCard REFUSES an empty candidate (frozen tree identical to base) — no empty commit ships, no real commit lost (round 20 #4)', async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-empty-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });

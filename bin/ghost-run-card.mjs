@@ -2,7 +2,7 @@
 // Live runner: drive ONE real card end to end against the real `claude` binary.
 // Usage: node bin/ghost-run-card.mjs path/to/card.json
 import { loadCard } from '../src/card.mjs';
-import { runCard } from '../src/spine.mjs';
+import { runCardSafely } from '../src/spine.mjs';
 import { makeClone, fetchBranchBack, commitTreeRef } from '../src/clone.mjs';
 import { runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
@@ -69,7 +69,7 @@ const deps = {
 };
 
 console.error(`👻 driving card "${card.project}" — goal: ${card.goal}`);
-const result = await runCard(card, deps);
+const result = await runCardSafely(card, deps);   // clone/verify/commit throw parks with pre-throw cost, not a crash (round 21 #7)
 if (result.mergeReady) {
   const clonePath = path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_'));
   // Match the daemon: a fetch failure parks with the REAL error, not a contradictory

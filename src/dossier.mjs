@@ -45,8 +45,13 @@ export function runnerAvailable(argv, { hasExe = realHasExe } = {}) {
 // flagged: those are cosmetic line-ending normalizations, common and benign on an all-LF macOS repo.
 export function usesTransformingFilters(repoPath) {
   if (fs.existsSync(path.join(repoPath, '.lfsconfig'))) return true;
-  try { return /(^|\s)filter=|working-tree-encoding=/i.test(fs.readFileSync(path.join(repoPath, '.gitattributes'), 'utf8')); }
-  catch { return false; }
+  try {
+    // Skip comment lines so a note like `# filter=lfs disabled` isn't read as an active filter and
+    // wrongly refuses the repo (round 21 #8). This is only a fast pre-filter; the verify-time
+    // git check-attr guard is authoritative and catches nested/config/candidate-added attributes.
+    return fs.readFileSync(path.join(repoPath, '.gitattributes'), 'utf8').split('\n')
+      .some(l => !l.trim().startsWith('#') && /(^|\s)filter=|working-tree-encoding=/i.test(l));
+  } catch { return false; }
 }
 
 export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}) {

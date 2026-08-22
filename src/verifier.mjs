@@ -16,9 +16,13 @@ import { sandboxNetDeny } from './sandbox.mjs';
 // the bytes acceptance tested and `git add` can't run a planted helper (round 15). Throws on a
 // dirty submodule (its inner bytes can affect the test but aren't in the tree). Returns a tree OID.
 const STERILE = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.autocrlf=false'];
+// execFileSync's default stdout buffer is only 1 MiB — a large tracked tree's ls-files/diff/hash-object
+// output overflows it and throws, parking a benign big repo before verification. Bound every git call to
+// 256 MiB so real repositories snapshot (round 21 #6).
+const MAXBUF = 256 * 1024 * 1024;
 export function sterileTree(clonePath) {
-  const run = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
-  const hashStdin = (input) => execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+  const run = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAXBUF }).toString();
+  const hashStdin = (input) => execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAXBUF }).toString().trim();
   const indexLines = [];      // "<mode> <oid>\t<path>" for update-index --index-info
   const batch = [];           // regular files hashed together in ONE git process
   // Add ONE worktree entry, re-hashing from DISK (defeats stale-index tricks). Rejects special
@@ -56,8 +60,8 @@ export function sterileTree(clonePath) {
         // `status.showUntrackedFiles=no` or submodule-ignore config could otherwise hide (round 18 #4).
         let head, dirty;
         try {
-          head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
-          dirty = execFileSync('git', [...STERILE, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+          head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAXBUF }).toString().trim();
+          dirty = execFileSync('git', [...STERILE, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAXBUF }).toString().trim();
         } catch (e) { throw new Error(`submodule ${f}: cannot verify HEAD/cleanliness — refusing (${e.message.split('\n')[0]})`); }
         if (head !== oid) throw new Error(`submodule ${f} HEAD ${head} != recorded ${oid} — refusing (its bytes aren't in the frozen tree)`);
         if (dirty) throw new Error(`submodule ${f} has uncommitted changes — refusing (its bytes aren't in the frozen tree)`);
@@ -65,8 +69,15 @@ export function sterileTree(clonePath) {
       indexLines.push(`160000 ${oid}\t${f}`);
     } else addWorktree(f);
   }
-  // Untracked new files (respecting .gitignore).
-  for (const f of run(undefined, 'ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean)) addWorktree(f);
+  // Untracked new files (respecting .gitignore). `ls-files --others` lists individual files, EXCEPT a
+  // nested git repository, which it reports as a single directory entry (it won't descend into another
+  // repo). addWorktree would silently omit that directory, dropping the nested repo's content from the
+  // frozen tree while another change still ships — refuse instead (round 21 #1).
+  for (const f of run(undefined, 'ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean)) {
+    let st; try { st = fs.lstatSync(path.join(clonePath, f)); } catch { continue; }
+    if (st.isDirectory()) throw new Error(`refusing to snapshot an untracked nested git repository at ${f} — its content can't be faithfully frozen`);
+    addWorktree(f);
+  }
   // Batch-hash all ordinary files in ONE process (was one spawn/file — 6.8s → ~0.1s for 400 files).
   if (batch.length) {
     const oids = run(batch.map(b => path.join(clonePath, b.f)).join('\n') + '\n', 'hash-object', '-w', '--no-filters', '--stdin-paths').trim().split('\n');
@@ -76,7 +87,7 @@ export function sterileTree(clonePath) {
   // filename that itself contains a newline can't split a record — the `\n`-joined form threw
   // "malformed index info" on such a path (round 18 #12).
   const idx = path.join(clonePath, '.git', `ghost-idx-${crypto.randomBytes(6).toString('hex')}`);
-  const withIdx = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, env: { ...process.env, GIT_INDEX_FILE: idx }, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+  const withIdx = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, env: { ...process.env, GIT_INDEX_FILE: idx }, input, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: MAXBUF }).toString();
   try {
     if (indexLines.length) withIdx(indexLines.join('\0') + '\0', 'update-index', '-z', '--index-info');
     return withIdx(undefined, 'write-tree').trim();
@@ -120,7 +131,7 @@ export function runAcceptance(argv, cwd, timeoutSec, env = buildSessionEnv([], p
 // can ship on a passing test alone while a destructive diff slips through (round 5 H1: the
 // packaged ghost-run-card runner had no deletion guard). `baseRef` lets the guard see committed
 // changes too (round 4 #1); `git` is injectable for tests.
-const gitOut = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
+const gitOut = (cwd, ...a) => execFileSync('git', a, { cwd, maxBuffer: MAXBUF }).toString();
 export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandbox = false, acceptanceTimeoutSec } = {}) {
   const ref = baseRef || 'HEAD';
   // FREEZE the full candidate tree — tracked mods AND untracked new files (git add -A respects
@@ -161,11 +172,11 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // with an effective `filter` (LFS/clean-smudge), `working-tree-encoding`, or `ident` attribute would
   // have a canonical blob that differs from the raw worktree bytes the sterile snapshot ships — refuse,
   // fail-closed (round 20 #2). Paths are enumerated NUL-safe; check-attr emits `path\0attr\0info\0` triples.
-  const attrPaths = execFileSync('git', [...STERILE, 'ls-files', '-z'], { cwd: clonePath }).toString()
-                  + execFileSync('git', [...STERILE, 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: clonePath }).toString();
+  const attrPaths = execFileSync('git', [...STERILE, 'ls-files', '-z'], { cwd: clonePath, maxBuffer: MAXBUF }).toString()
+                  + execFileSync('git', [...STERILE, 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: clonePath, maxBuffer: MAXBUF }).toString();
   if (attrPaths) {
     const parts = execFileSync('git', [...STERILE, 'check-attr', 'filter', 'working-tree-encoding', 'ident', '-z', '--stdin'],
-      { cwd: clonePath, input: attrPaths, maxBuffer: 64 * 1024 * 1024 }).toString().split('\0');
+      { cwd: clonePath, input: attrPaths, maxBuffer: MAXBUF }).toString().split('\0');
     for (let i = 0; i + 2 < parts.length; i += 3) {
       const [p, attr, info] = [parts[i], parts[i + 1], parts[i + 2]];
       if (p && info !== 'unspecified' && info !== 'unset') {
@@ -192,8 +203,11 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   }
   // Destructive-change guard on the frozen tree (baseRef → treeBefore, so untracked additions
   // count). --no-ext-diff --no-textconv so a planted `diff.external`/`textconv` can't execute in
-  // the daemon during our diff, and fsmonitor/hooks disabled (round 15).
-  const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv'];
+  // the daemon during our diff, and fsmonitor/hooks disabled (round 15). --ignore-submodules=none so
+  // `diff.ignoreSubmodules=all` can't hide a deleted gitlink from the guard, and --find-renames (with a
+  // bounded rename limit) so `diff.renames=false` can't turn a benign rename into delete+add and
+  // falsely trip the gutting thresholds (round 21 #3).
+  const D = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '-l5000'];
   const stat = git(clonePath, ...D, '--shortstat', ref, treeBefore, '--').trim();
   if (suspiciousDeletion(card.goal, stat)) {
     return { pass: false, detail: { testOutput: `test passed but the diff is net-negative for a build goal — refusing (${stat})` } };
@@ -216,21 +230,29 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
 // unshipped ignored bytes, so it's reap-safe (a test that self-provisions deps regenerates them anyway).
 export function hasIgnoredState(clonePath, git = gitOut) {
   try {
-    const out = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain', '--ignored', '--untracked-files=all').toString();
-    return out.split('\n').some(l => l.startsWith('!!'));       // "!!" prefixes an ignored entry
+    const S = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+    const out = git(clonePath, ...S, 'status', '--porcelain', '--ignored', '--untracked-files=all').toString();
+    if (out.split('\n').some(l => l.startsWith('!!'))) return true;   // "!!" prefixes an ignored entry
+    // `git status --ignored` does NOT descend into a populated submodule, so ignored deps installed
+    // inside one are invisible here and could drive a false pass then be reaped. Conservatively treat
+    // ANY populated submodule as ignored-state present → preserve its clone (round 21 #2).
+    for (const line of git(clonePath, ...S, 'ls-files', '--stage', '-z').toString().split('\0').filter(Boolean)) {
+      const m = line.match(/^160000 [0-9a-f]+ \d+\t([\s\S]*)$/);
+      if (m && fs.existsSync(path.join(clonePath, m[1], '.git'))) return true;
+    }
+    return false;
   } catch { return true; }   // can't tell → preserve the clone (fail safe)
 }
 
-// Cheapest guard: did the working tree actually change vs the base commit the session
-// started from? An empty patch fails fast without spending a full acceptance-test run.
+// Did the candidate actually change vs the base? An empty patch fails fast before a full test run.
+// Compares the STERILE tree (hashes DISK bytes) against the base commit's tree, NOT `git status` —
+// status is blinded by `status.showUntrackedFiles=no` and by assume-unchanged/skip-worktree index
+// flags, either of which could hide a real candidate and skip verification (round 21 #5).
 export function patchApplied(clonePath, baseRef) {
-  // Run status/diff STERILE (fsmonitor/hooks off, no ext-diff/textconv) so a candidate config
-  // can't execute a helper in the daemon before verification is even reached (round 16 b).
-  const s = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
-  const out = execFileSync('git', [...s, 'status', '--porcelain'], { cwd: clonePath }).toString().trim();
-  if (out) return true;
-  const diff = execFileSync('git', [...s, 'diff', '--no-ext-diff', '--no-textconv', '--stat', `${baseRef}..HEAD`], { cwd: clonePath }).toString().trim();
-  return diff.length > 0;
+  try {
+    const baseTree = execFileSync('git', [...STERILE, 'rev-parse', `${baseRef}^{tree}`], { cwd: clonePath, maxBuffer: MAXBUF }).toString().trim();
+    return sterileTree(clonePath) !== baseTree;
+  } catch { return true; }   // can't tell → assume a patch exists; verify's own empty-diff guard is the authority
 }
 
 const DONE_CLAIM = /\b(all tests pass|tests pass|done|complete|finished|implemented|fixed it|works now)\b/i;
