@@ -31,7 +31,10 @@ export function sandboxWriteConfine(argv, clone, { home = os.homedir(), platform
     '(allow file-write*',
     `  (subpath "${clone}") (subpath "/private${clone}")`,   // the clone (both real + /private alias)
     `  (subpath "${tmpdir}") (regex #"^/private/var/folders/")`,
-    `  (subpath "${home}/.claude") (subpath "${home}/.codex") (subpath "${home}/.cache") (subpath "${home}/.npm")`,   // agent/tool state
+    // agent/tool state + package-manager stores/caches, so the agent can bootstrap the clone's missing
+    // deps under the sandbox too (npm/pnpm/yarn/bun write outside the clone) — round 28 #12b under sandbox.
+    `  (subpath "${home}/.claude") (subpath "${home}/.codex") (subpath "${home}/.cache") (subpath "${home}/.npm")`,
+    `  (subpath "${home}/.bun") (subpath "${home}/.local") (subpath "${home}/Library/pnpm") (subpath "${home}/Library/Caches")`,
     '  (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper"))',
   ].join(' ');
   return ['sandbox-exec', '-p', profile, ...argv];

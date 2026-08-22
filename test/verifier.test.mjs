@@ -472,6 +472,9 @@ test('sandboxWriteConfine confines writes to the clone but ALLOWS network (round
   assert.doesNotMatch(wrapped[2], /deny network/);        // the coding agent's API must still work
   assert.match(wrapped[2], /\(deny file-write\*\)/);
   assert.match(wrapped[2], /subpath "\/work\/clone-1"/);  // writes allowed under the clone
+  assert.match(wrapped[2], /Library\/pnpm/);              // + package-manager stores so deps can install under sandbox (round 28 #12b)
+  assert.match(wrapped[2], /\.bun/);
+  assert.doesNotMatch(wrapped[2], /\.ssh|\.aws|\.gnupg/); // sensitive stores are NOT write-allowed
   assert.deepEqual(wrapped.slice(-3), ['claude', '-p', 'x']);
   assert.deepEqual(sandboxWriteConfine(['claude'], '/c', { platform: 'linux' }), ['claude']);   // no-op off macOS
   assert.deepEqual(sandboxWriteConfine(['claude'], null, { platform: 'darwin' }), ['claude']);  // no clone → no-op
