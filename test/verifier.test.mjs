@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, hasIgnoredState, isNoOpCommand, acceptanceNeutered } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, hasIgnoredState, isNoOpCommand, acceptanceNeutered, isPmTest } from '../src/verifier.mjs';
 
 test('sterileTree stores a symlink as a link blob (mode 120000, content=target), not by following it (round 15)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-sl-'));
@@ -723,5 +723,29 @@ test('verifyCard REFUSES a candidate that neutered package.json scripts.test eve
   const v = await verifyCard(card, d, { baseRef: base });
   assert.equal(v.pass, false);                                  // npm test passed, but the test was neutered
   assert.match(v.detail.testOutput, /neuter|no-op/i);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('isPmTest recognizes package-manager test acceptances only (round 31)', () => {
+  for (const a of [['npm', 'test'], ['pnpm', 'test'], ['yarn', 'test'], ['bun', 'test']]) assert.equal(isPmTest(a), true, a.join(' '));
+  for (const a of [['node', '-e', 'x'], ['npm', 'run', 'build'], ['pytest', '-q'], ['go', 'test'], ['npm'], [], null]) assert.equal(isPmTest(a), false, JSON.stringify(a));
+});
+
+test('verifyCard on a repo WITHOUT package.json ships cleanly with NO git stderr leak (round 31 Codex live run)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nopkg-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'index.js'), 'export const v = 1;\n'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = g('rev-parse', 'HEAD').toString().trim();
+  fs.writeFileSync(path.join(d, 'DONE.txt'), 'done\n');                       // a real candidate change
+  const card = { goal: 'add DONE.txt', acceptanceArgv: ['node', '-e', 'process.exit(0)'], acceptanceTimeoutSec: 30 };
+  // capture stderr to prove the neuter-check's package.json read is skipped (no `fatal:` line)
+  let stderr = '';
+  const origWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, ...rest) => { stderr += String(chunk); return origWrite(chunk, ...rest); };
+  let v;
+  try { v = await verifyCard(card, d, { baseRef: base }); } finally { process.stderr.write = origWrite; }
+  assert.equal(v.pass, true);                                                // ships (non-pm-test, real change)
+  assert.doesNotMatch(stderr, /fatal: path 'package\.json'/);                // no stderr leak from the neuter read
   fs.rmSync(d, { recursive: true, force: true });
 });

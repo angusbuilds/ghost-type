@@ -265,16 +265,19 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
     git(clonePath, ...D, '--numstat', ref, treeBefore, '--').trim(),
     git(clonePath, ...D, '--name-status', ref, treeBefore, '--').trim());
   if (reason) return { pass: false, detail: { testOutput: `test passed but the change looks destructive — refusing (${reason})` } };
-  // Acceptance-integrity backstop: for a `<pm> test` acceptance, refuse a candidate that rewrote a
+  // Acceptance-integrity backstop: for a `<pm> test` acceptance ONLY, refuse a candidate that rewrote a
   // real package.json scripts.test into a no-op (the neuter-the-test cheat the destructive-diff guard
-  // can't see, since package.json isn't a TESTISH file). Reads the field at base and the frozen tree;
-  // `git show <treeish>:package.json` fails cleanly to null when absent (round 31 live park run).
-  const testScriptAt = (treeish) => {
-    try { return JSON.parse(git(clonePath, ...STERILE, 'show', `${treeish}:package.json`))?.scripts?.test ?? null; }
-    catch { return null; }
-  };
-  const neutered = acceptanceNeutered(card.acceptanceArgv, testScriptAt(ref), testScriptAt(treeBefore));
-  if (neutered) return { pass: false, detail: { testOutput: `test passed but ${neutered} — refusing` } };
+  // can't see, since package.json isn't a TESTISH file). Gated on isPmTest so a non-npm repo never
+  // triggers the package.json read; stderr is suppressed so a missing file can't leak a `fatal:` line
+  // into the report (round 31 live park run + Codex live run). Reads the field at base and frozen tree.
+  if (isPmTest(card.acceptanceArgv)) {
+    const testScriptAt = (treeish) => {
+      try { return JSON.parse(execFileSync('git', [...STERILE, 'show', `${treeish}:package.json`], { cwd: clonePath, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAXBUF }))?.scripts?.test ?? null; }
+      catch { return null; }
+    };
+    const neutered = acceptanceNeutered(card.acceptanceArgv, testScriptAt(ref), testScriptAt(treeBefore));
+    if (neutered) return { pass: false, detail: { testOutput: `test passed but ${neutered} — refusing` } };
+  }
   // Return the frozen tree OID so the caller ships THIS exact verified tree via hook-free plumbing
   // (commit-tree), not a fresh checkout/commit that a planted post-checkout hook could mutate (round 13).
   return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' }, tree: treeBefore, hadIgnoredState };
@@ -409,6 +412,13 @@ export function isNoOpCommand(cmd) {
 }
 
 const PM_TEST = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
+// True when the acceptance is `<pm> test` — its behaviour lives in package.json scripts.test. Used to
+// gate the neuter check so we only read package.json when it's relevant (a pm-test repo always has
+// one), avoiding a spurious `git show` on every non-npm repo (round 31 — the read leaked git's stderr).
+export function isPmTest(acceptanceArgv) {
+  return Array.isArray(acceptanceArgv) && PM_TEST.has(acceptanceArgv[0]) && acceptanceArgv.includes('test');
+}
 
 // Defense-in-depth for the #1 attack (make the test pass by defeating the test): when the acceptance
 // is `<pm> test`, its behaviour lives in the editable package.json `scripts.test`. Refuse a candidate
