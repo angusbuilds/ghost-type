@@ -72,7 +72,9 @@ console.error(`👻 driving card "${card.project}" — goal: ${card.goal}`);
 const result = await runCard(card, deps);
 if (result.mergeReady) {
   const clonePath = path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_'));
+  // Match the daemon: a fetch failure parks with the REAL error, not a contradictory
+  // outcome:'shipped'/'acceptance passed' report (round 20 #6). The clone is left intact.
   try { fetchBranchBack(card.repoPath, clonePath, card.branch, result.commitOid); }
-  catch (e) { console.error('⚠', e.message); result.mergeReady = false; }
+  catch (e) { console.error('⚠', e.message); result.mergeReady = false; result.outcome = 'parked'; result.whyLine = `verified but could not fetch the branch back: ${String(e.message).split('\n')[0]}`; }
 }
 console.log('\n' + renderReport({ date: new Date().toISOString().slice(0, 10), cards: [result], tokens: result.tokensUsed || 0, costUsd: result.costUsd || 0 }));

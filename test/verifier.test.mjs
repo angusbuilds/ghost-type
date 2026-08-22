@@ -139,6 +139,34 @@ test('verifyCard REFUSES an added/changed submodule gitlink — its nested commi
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+test('verifyCard REFUSES an empty candidate (frozen tree identical to base) — no empty commit ships, no real commit lost (round 20 #4)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-empty-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.js'), 'export const x = 1;'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'do something', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(v.pass, false);                                       // worktree == base → frozen tree == base → nothing to ship
+  assert.match(v.detail.testOutput, /identical to the base|empty change/i);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('verifyCard catches a changed gitlink even when diff.ignoreSubmodules=all would hide it (round 20 #1)', async () => {
+  const { main, sub } = mkSubmoduleRepo('gt-igsub-');
+  const gm = (...a) => execFileSync('git', a, { cwd: main });
+  gm('commit', '-q', '-m', 'base with submodule');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: main }).toString().trim();
+  gm('config', 'diff.ignoreSubmodules', 'all');                     // config that would blind a plain diff
+  fs.writeFileSync(path.join(sub, 'x'), '2');
+  execFileSync('git', ['add', '-A'], { cwd: sub }); execFileSync('git', ['commit', '-q', '-m', 'sub v2'], { cwd: sub });
+  gm('-c', 'protocol.file.allow=always', 'add', 'sub');             // stage the new gitlink...
+  fs.writeFileSync(path.join(main, 'a.txt'), 'changed');            // ...plus a normal change so the diff isn't empty
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'update', branch: 'ghost/x' }, main, { baseRef: base });
+  assert.equal(v.pass, false);                                      // --ignore-submodules=none overrides the config → gitlink seen → refused
+  assert.match(v.detail.testOutput, /nested commit can't be published|added\/changed/i);
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
 test('foreignIgnoredState: ignored dependency dirs are reapable, candidate-created ignored files are NOT (round 19 A3)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fig-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });

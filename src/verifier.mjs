@@ -141,8 +141,15 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // commit (and, post-reap, an unrecoverable one). We can't publish nested objects, so refuse. In
   // `git diff --raw` a changed/added gitlink is the only way a NEW mode of 160000 appears (a deletion
   // has new mode 000000), so that alone is the signal (round 19 A1).
-  const raw = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv', '--raw', ref, treeBefore, '--').trim();
-  for (const line of raw ? raw.split('\n') : []) {
+  // --ignore-submodules=none so a repo's `diff.ignoreSubmodules=all` config can't suppress the gitlink
+  // record and slip a changed gitlink past the check below (round 20 #1).
+  const raw = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--raw', ref, treeBefore, '--').trim();
+  // An EMPTY frozen-vs-base diff means the candidate ships NOTHING: an agent can commit real work yet
+  // leave the worktree at base bytes, so sterileTree reconstructs the base tree and patchApplied (which
+  // sees the dirty/ahead HEAD) still let us in. Shipping that is an empty "merge-ready" commit, and
+  // reaping then deletes the agent's real commit — refuse (round 20 #4).
+  if (!raw) return { pass: false, detail: { testOutput: 'acceptance passed but the candidate tree is identical to the base — refusing an empty change (no effective patch to ship)' } };
+  for (const line of raw.split('\n')) {
     const m = line.match(/^:\d{6} (\d{6}) [0-9a-f]+ [0-9a-f]+ \w/);   // :<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>
     if (m && m[1] === '160000') {
       return { pass: false, detail: { testOutput: `refusing: submodule ${line.split('\t').slice(1).join('\t')} was added/changed — its nested commit can't be published, so the shipped branch would reference an unavailable object (round 19 A1)` } };
