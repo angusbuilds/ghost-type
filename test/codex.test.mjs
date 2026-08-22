@@ -4,13 +4,14 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { parseCodexStream, runCodex, runAgent, codexArgs } from '../src/engine.mjs';
 
-test('codexArgs uses danger-full-access under the OS sandbox to avoid a nested-sandbox conflict (round 13)', () => {
+test('codexArgs uses danger-full-access only for CODING calls under the OS sandbox (round 13)', () => {
+  const mode = (a) => a[a.indexOf('--sandbox') + 1];
   // no OS sandbox → codex uses its own workspace-write confinement
-  const plain = codexArgs({ cwd: '/c', prompt: 'p' });
-  assert.equal(plain[plain.indexOf('--sandbox') + 1], 'workspace-write');
-  // OS write-confine active (sandboxClone) → codex must NOT double-sandbox (it would silently fail to write)
-  const sboxed = codexArgs({ cwd: '/c', prompt: 'p', sandboxClone: '/c' });
-  assert.equal(sboxed[sboxed.indexOf('--sandbox') + 1], 'danger-full-access');
+  assert.equal(mode(codexArgs({ cwd: '/c', prompt: 'p' })), 'workspace-write');
+  // CODING call + OS write-confine → codex must NOT double-sandbox (nested Seatbelt silently fails to write)
+  assert.equal(mode(codexArgs({ cwd: '/c', prompt: 'p', sandbox: 'workspace-write', sandboxClone: '/c' })), 'danger-full-access');
+  // READ-ONLY writer call + OS sandbox → keeps codex's own read-only sandbox (not OS-wrapped, invariant preserved)
+  assert.equal(mode(codexArgs({ cwd: '/c', prompt: 'p', sandbox: 'read-only', sandboxClone: '/c' })), 'read-only');
 });
 
 const FAKE = path.resolve('test/fake-codex.mjs');

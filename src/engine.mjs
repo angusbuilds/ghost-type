@@ -140,12 +140,16 @@ export function parseCodexStream(text) {
 
 // Drive Codex headless in the isolated clone. Returns the SAME shape as runEngine so the
 // spine/watcher work unchanged: a synthesized result.subtype of success|error.
-// Build the `codex exec` argv. When WE wrap codex in the OS sandbox (sandboxClone set), codex must
-// NOT also apply its own Seatbelt sandbox — a nested sandbox-exec silently fails to write (the turn
-// "completes" but no file lands). Use danger-full-access and let our OS write-confine be the
-// confinement (round 13). Exported for testing the sandbox-mode selection.
+// Our OS write-confine only wraps CODING calls — a read-only writer keeps codex's own read-only
+// sandbox (which works standalone and needs no host write access).
+const codexOsWrapped = (sandbox, sandboxClone) => Boolean(sandboxClone) && sandbox !== 'read-only';
+
+// Build the `codex exec` argv. When WE wrap codex in the OS sandbox (a coding call with sandboxClone),
+// codex must NOT also apply its own Seatbelt sandbox — a nested sandbox-exec silently fails to write
+// (the turn "completes" but no file lands). Use danger-full-access there and let our OS write-confine
+// be the confinement (round 13). Read-only writer calls are unaffected (they keep codex read-only).
 export function codexArgs({ cwd, sandbox = 'workspace-write', model, prompt, sandboxClone }) {
-  const effSandbox = sandboxClone ? 'danger-full-access' : sandbox;
+  const effSandbox = codexOsWrapped(sandbox, sandboxClone) ? 'danger-full-access' : sandbox;
   const args = ['exec', '--json', '-C', cwd, '--sandbox', effSandbox, '--skip-git-repo-check', '-c', 'approval_policy="never"'];
   if (model) args.push('-m', model);
   args.push(prompt);
@@ -155,7 +159,7 @@ export function codexArgs({ cwd, sandbox = 'workspace-write', model, prompt, san
 export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env, bin, timeoutMs = DEFAULT_CALL_TIMEOUT_MS, sandboxClone }) {
   const exe = bin || CODEX_BIN;
   const args = codexArgs({ cwd, sandbox, model, prompt, sandboxClone });
-  const [cmd, ...cmdArgs] = sandboxClone ? sandboxWriteConfine([exe, ...args], sandboxClone) : [exe, ...args];
+  const [cmd, ...cmdArgs] = codexOsWrapped(sandbox, sandboxClone) ? sandboxWriteConfine([exe, ...args], sandboxClone) : [exe, ...args];
   return new Promise((resolve) => {
     // IGNORE stdin — with a non-TTY stdin `codex exec` prints "Reading additional input from
     // stdin..." and blocks forever waiting for it (every call hung until the timeout). /dev/null
