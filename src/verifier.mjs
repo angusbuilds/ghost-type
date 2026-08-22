@@ -173,6 +173,10 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
       }
     }
   }
+  // Snapshot whether the candidate holds ignored state BEFORE the test runs — the test may read then
+  // delete it, so a post-acceptance check would miss it. This rides the pass result so the caller can
+  // decide whether reaping the clone is safe (round 20 #3).
+  const hadIgnoredState = hasIgnoredState(clonePath, git);
   // acceptanceTimeoutSec (from the governor's remaining time) caps the test so it can't run its
   // full card timeout past the nightly deadline (round 8 Medium).
   const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);
@@ -200,27 +204,21 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   if (reason) return { pass: false, detail: { testOutput: `test passed but the change looks destructive — refusing (${reason})` } };
   // Return the frozen tree OID so the caller ships THIS exact verified tree via hook-free plumbing
   // (commit-tree), not a fresh checkout/commit that a planted post-checkout hook could mutate (round 13).
-  return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' }, tree: treeBefore };
+  return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' }, tree: treeBefore, hadIgnoredState };
 }
 
-// Standard dependency/build directories: their ignored content is regenerated from committed state
-// (npm install, a build), so it's safe to reap a completed clone that only holds these.
-const DEP_DIRS = new Set(['node_modules', '.venv', 'venv', 'env', '__pycache__', '.pytest_cache', 'target',
-  'dist', 'build', '.next', '.nuxt', 'out', 'vendor', '.gradle', '.tox', '.mypy_cache', 'coverage', '.parcel-cache', '.turbo', '.cache']);
-// Does the clone hold candidate-created ignored state OUTSIDE a recognized dependency dir? Such state
-// (e.g. a hand-written, git-ignored data file the test read) can drive a passing acceptance while being
-// ABSENT from the shipped tree — a false pass whose evidence lives only in the clone. Reaping such a clone
-// would destroy the only copy (round 19 A3). git collapses ignored dirs to one entry (e.g. "node_modules/").
-export function foreignIgnoredState(clonePath, git = gitOut) {
-  let out = '';
-  try { out = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain', '--ignored', '--untracked-files=all').toString(); }
-  catch { return true; }   // can't tell → assume foreign state exists and preserve the clone (fail safe)
-  for (const line of out.split('\n')) {
-    if (!line.startsWith('!!')) continue;                       // ignored entries are prefixed "!!"
-    const top = line.slice(3).trim().replace(/\/$/, '').split('/')[0];
-    if (top && !DEP_DIRS.has(top)) return true;                 // ignored content that isn't a known dependency dir
-  }
-  return false;
+// Does the clone hold ANY git-ignored state? Captured BEFORE acceptance, this is the signal for
+// whether a completed clone is safe to reap. Ignored state present before the test ran was created by
+// the agent (or pre-existing) and may be exactly what a passing test read — and it is ABSENT from the
+// shipped tree, so reaping the clone would destroy the only copy of a possibly-false pass (round 20 #3,
+// which showed a dependency-dir allowlist was a bypass: node_modules/evil.json). No allowlist: any
+// ignored entry means preserve. A clone with NO ignored state before the test cannot have depended on
+// unshipped ignored bytes, so it's reap-safe (a test that self-provisions deps regenerates them anyway).
+export function hasIgnoredState(clonePath, git = gitOut) {
+  try {
+    const out = git(clonePath, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'status', '--porcelain', '--ignored', '--untracked-files=all').toString();
+    return out.split('\n').some(l => l.startsWith('!!'));       // "!!" prefixes an ignored entry
+  } catch { return true; }   // can't tell → preserve the clone (fail safe)
 }
 
 // Cheapest guard: did the working tree actually change vs the base commit the session

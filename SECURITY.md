@@ -91,11 +91,13 @@ implemented — these surface as a parked/refused card, not a silent bad ship.
 **Candidate-created ignored state:** acceptance runs in the worktree (so `.gitignore`d dependencies
 like `node_modules` are present), but the shipped tree excludes ignored files. An agent that makes a
 *git-ignored* file the test then depends on can therefore produce a pass whose evidence isn't in the
-shipped tree — a false pass the morning diff is the gate for. To keep that recoverable, a completed
-clone is **not** reaped when it holds ignored state outside a recognized dependency/build directory;
-it's preserved for review instead. (Why not "check out the frozen tree and test *that*"? Because the
-frozen tree excludes those same `node_modules`/`.venv` dependencies, so a bare-checkout test would
-fail every repo whose tests need installed deps — testing the worktree is the right trade.)
+shipped tree — a false pass the morning diff is the gate for. To keep that recoverable, verification
+records whether **any** ignored state existed **before** the test ran, and a completed clone is reaped
+**only when there was none**; any ignored state (no dependency-directory exemption — that was a
+bypass) preserves the clone for review. A clone with no pre-test ignored state can't have depended on
+unshipped ignored bytes, so it's safe to reclaim. (Why not "check out the frozen tree and test *that*"?
+Because the frozen tree excludes those same `node_modules`/`.venv` dependencies, so a bare-checkout
+test would fail every repo whose tests need installed deps — testing the worktree is the right trade.)
 
 ## Reporting
 

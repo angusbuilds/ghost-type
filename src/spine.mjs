@@ -154,7 +154,7 @@ export async function runCard(card, deps) {
       const commitOid = commit(clonePath, card.branch, { tree: v.tree, baseRef });
       recordPrompt({ iteration: iterations, prompt, outcome: 'shipped', project: card.project });
       log({ evt: 'card-shipped', project: card.project, iterations, falseDoneCount, tokensUsed, costUsd });
-      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed, costUsd, commitOid, tree: v.tree };
+      return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed, costUsd, commitOid, tree: v.tree, hadIgnoredState: v.hadIgnoredState };
     }
 
     governor?.noteError();

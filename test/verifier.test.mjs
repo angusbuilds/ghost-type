@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, foreignIgnoredState } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, hasIgnoredState } from '../src/verifier.mjs';
 
 test('sterileTree stores a symlink as a link blob (mode 120000, content=target), not by following it (round 15)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-sl-'));
@@ -183,16 +183,30 @@ test('verifyCard refuses an effective filter attribute from a NESTED/candidate-a
   fs.rmSync(d, { recursive: true, force: true });
 });
 
-test('foreignIgnoredState: ignored dependency dirs are reapable, candidate-created ignored files are NOT (round 19 A3)', () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fig-'));
+test('hasIgnoredState is true for ANY ignored state incl. inside a dep dir (no allowlist bypass), false when clean (round 20 #3)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-his-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
   g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
   fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\ndata.json\n');
   fs.writeFileSync(path.join(d, 'a.js'), '1'); g('add', '-A'); g('commit', '-q', '-m', 'base');
-  fs.mkdirSync(path.join(d, 'node_modules')); fs.writeFileSync(path.join(d, 'node_modules', 'x.js'), 'dep');
-  assert.equal(foreignIgnoredState(d), false);                       // only a dependency dir is ignored → safe to reap
-  fs.writeFileSync(path.join(d, 'data.json'), '{"agent":"wrote this, test read it"}');
-  assert.equal(foreignIgnoredState(d), true);                        // a candidate-created ignored file → preserve the clone
+  assert.equal(hasIgnoredState(d), false);                           // clean: nothing ignored present → reap-safe
+  fs.mkdirSync(path.join(d, 'node_modules')); fs.writeFileSync(path.join(d, 'node_modules', 'evil.json'), 'the round-19 bypass');
+  assert.equal(hasIgnoredState(d), true);                            // even inside node_modules → preserved, no allowlist to bypass
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('verifyCard reports hadIgnoredState so the caller can decide whether reaping the clone is safe (round 20 #3)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-hadig-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.js'), '1'); fs.writeFileSync(path.join(d, '.gitignore'), 'secret.dat\n'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  fs.writeFileSync(path.join(d, 'feature.js'), 'the shipped change');            // a real (untracked, additive) change
+  const clean = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'add feature', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(clean.pass, true); assert.equal(clean.hadIgnoredState, false);    // no ignored state → clone is reap-safe
+  fs.writeFileSync(path.join(d, 'secret.dat'), 'agent-created ignored input the test might read');
+  const dirty = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'add feature', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(dirty.pass, true); assert.equal(dirty.hadIgnoredState, true);     // ignored state present → preserve the clone
   fs.rmSync(d, { recursive: true, force: true });
 });
 
