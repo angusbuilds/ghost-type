@@ -46,10 +46,11 @@ const deps = {
     git(clonePath, 'config', 'user.email', 'ghost@ghosttype.local');
     git(clonePath, 'config', 'user.name', 'Ghost Type');
     const msg = `ghost: ${card.goal.slice(0, 60)}`;
-    if (tree && baseRef) { commitTreeRef(git, clonePath, branch, tree, baseRef, msg); return; }   // hook-free ship (round 13)
+    if (tree && baseRef) return commitTreeRef(git, clonePath, branch, tree, baseRef, msg);   // hook-free ship → returns OID (round 13/14)
     try { git(clonePath, 'checkout', '-B', branch); } catch { /* already there */ }
     const dirty = git(clonePath, 'status', '--porcelain').trim();
     if (dirty) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', msg); }
+    return git(clonePath, 'rev-parse', 'HEAD').trim();
   },
   gitDiff: (cwd) => ({
     stat: git(cwd, 'diff', '--shortstat', 'HEAD'),
@@ -70,6 +71,7 @@ console.error(`👻 driving card "${card.project}" — goal: ${card.goal}`);
 const result = await runCard(card, deps);
 if (result.mergeReady) {
   const clonePath = path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_'));
-  fetchBranchBack(card.repoPath, clonePath, card.branch);
+  try { fetchBranchBack(card.repoPath, clonePath, card.branch, result.commitOid); }
+  catch (e) { console.error('⚠', e.message); result.mergeReady = false; }
 }
 console.log('\n' + renderReport({ date: new Date().toISOString().slice(0, 10), cards: [result], tokens: result.tokensUsed || 0, costUsd: result.costUsd || 0 }));

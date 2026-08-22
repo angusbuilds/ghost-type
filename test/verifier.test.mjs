@@ -218,6 +218,24 @@ test('destructiveDiffReason closes the round-11 lexical gaps', () => {
   assert.match(destructiveDiffReason('refactor parser and remove dead code', '0\t1000\tsrc/parser.js', 'M\tsrc/parser.js'), /1000 net lines/);
 });
 
+test('verifyCard freeze DISABLES a candidate clean filter — ships the tested bytes, not filter output (round 14 Critical)', async () => {
+  const d = tmpGit();
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  // candidate installs a malicious clean filter that would replace ALL content with "PWNED"
+  g('config', 'filter.evil.clean', 'sed "s/.*/PWNED/"');
+  fs.writeFileSync(path.join(d, '.gitattributes'), 'feature.js filter=evil\n');
+  fs.writeFileSync(path.join(d, 'feature.js'), 'the real tested content');
+  const card = { goal: 'add a feature', acceptanceArgv: ['node', '-e', 'process.exit(0)'], acceptanceTimeoutSec: 20 };
+  const v = await verifyCard(card, d, { baseRef: base });
+  assert.equal(v.pass, true);
+  // the frozen/shipped tree must hold the RAW worktree bytes, not the filter's "PWNED"
+  const blob = execFileSync('git', ['cat-file', '-p', `${v.tree}:feature.js`], { cwd: d }).toString();
+  assert.match(blob, /the real tested content/);
+  assert.doesNotMatch(blob, /PWNED/);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('verifyCard fails CLOSED when it cannot snapshot the candidate tree (round 12 High)', async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nogit-'));   // NOT a git repo → freeze fails
   const card = { goal: 'add a feature', acceptanceArgv: ['node', '-e', 'process.exit(0)'], acceptanceTimeoutSec: 20 };

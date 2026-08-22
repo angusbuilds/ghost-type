@@ -50,7 +50,16 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // hashes CONTENT, so any later change is visible: erasing an untracked file, corrupting content
   // in place, or committing a different tree all change the hash (round 11: the round-10 filename-
   // only check missed untracked deletion + corruption + commit-over).
-  const freeze = () => { git(clonePath, 'add', '-A'); return git(clonePath, 'write-tree').trim(); };
+  // Disable any candidate-installed clean filter for OUR snapshot: a planted `.gitattributes` +
+  // `filter.X.clean` would otherwise (a) EXECUTE arbitrary code during `git add` with the daemon's
+  // env, outside the sandbox, and (b) store FILTERED bytes ≠ the worktree bytes acceptance tested.
+  // Overriding each `filter.*.clean` to empty makes `git add` store the raw worktree bytes (round 14).
+  const filterOverrides = [];
+  try {
+    const cfg = git(clonePath, 'config', '--get-regexp', String.raw`^filter\..*\.clean$`).trim();
+    for (const line of cfg.split('\n').filter(Boolean)) filterOverrides.push('-c', `${line.split(/\s+/)[0]}=`);
+  } catch { /* no clean filters configured */ }
+  const freeze = () => { git(clonePath, ...filterOverrides, '-c', 'core.hooksPath=/dev/null', 'add', '-A'); return git(clonePath, 'write-tree').trim(); };
   // FAIL CLOSED: every real caller is a git clone, so a freeze failure (e.g. a stale
   // .git/index.lock a rigged test could exploit) must refuse verification, not skip the mutation
   // check and let an empty diff ship (round 12).

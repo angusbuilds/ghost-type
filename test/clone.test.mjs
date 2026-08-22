@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeClone, validateClonePath, assertNoSymlinkAncestor, commitTreeRef } from '../src/clone.mjs';
+import { makeClone, validateClonePath, assertNoSymlinkAncestor, commitTreeRef, fetchBranchBack } from '../src/clone.mjs';
 import { WORK_DIR } from '../src/lib.mjs';
 
 function tmpRepo() {
@@ -115,4 +115,22 @@ test('commitTreeRef ships the EXACT tree with NO hooks run — a post-checkout h
   assert.equal(shipped, 'the verified content');                 // exactly the verified tree...
   assert.equal(g(d, 'rev-parse', 'ghost/x^{tree}').trim(), tree); // ...bound to the branch commit
   fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('fetchBranchBack refuses when the landed OID != the verified commit (round 14 TOCTOU)', () => {
+  const src = tmpRepo();
+  const clone = makeClone(src, 'ft-' + process.pid);
+  const g = (cwd, ...a) => execFileSync('git', a, { cwd }).toString();
+  // build a verified commit in the clone via commitTreeRef
+  const base = g(clone, 'rev-parse', 'HEAD').trim();
+  fs.writeFileSync(path.join(clone, 'feature.js'), 'verified');
+  g(clone, 'add', '-A'); const tree = g(clone, 'write-tree').trim();
+  const oid = commitTreeRef(g, clone, 'ghost/ft', tree, base, 'ship');
+  // fetching with the CORRECT oid succeeds
+  assert.doesNotThrow(() => fetchBranchBack(src, clone, 'ghost/ft', oid));
+  // simulate tampering: repoint the clone branch to base, then fetch expecting the verified oid → refuse
+  g(clone, 'update-ref', 'refs/heads/ghost/ft2', base);
+  assert.throws(() => fetchBranchBack(src, clone, 'ghost/ft2', oid), /post-verify tampering|refusing/);
+  fs.rmSync(clone, { recursive: true, force: true });
+  fs.rmSync(src, { recursive: true, force: true });
 });

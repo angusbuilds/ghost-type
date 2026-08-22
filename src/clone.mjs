@@ -71,13 +71,23 @@ export function makeClone(repoPath, taskId) {
 // `git` is injected as (cwd, ...args) => stdout. Returns the new commit OID.
 export function commitTreeRef(git, clonePath, branch, tree, baseRef, msg) {
   const parent = git(clonePath, 'rev-parse', baseRef).trim();
-  const oid = git(clonePath, 'commit-tree', tree, '-p', parent, '-m', msg).trim();
-  git(clonePath, 'update-ref', `refs/heads/${branch}`, oid);
+  // core.hooksPath=/dev/null disables ALL hooks for these ops — including reference-transaction,
+  // which git runs on update-ref and could otherwise repoint the branch after our commit (round 14).
+  const noHooks = ['-c', 'core.hooksPath=/dev/null'];
+  const oid = git(clonePath, ...noHooks, 'commit-tree', tree, '-p', parent, '-m', msg).trim();
+  git(clonePath, ...noHooks, 'update-ref', `refs/heads/${branch}`, oid);
   return oid;
 }
 
-// Pull a completed branch back into the real repo WITHOUT pushing: fetch from the
-// clone into the source. The real repo is only ever a fetch destination, never a push target.
-export function fetchBranchBack(repoPath, clonePath, branch) {
-  execFileSync('git', ['fetch', '--quiet', path.resolve(clonePath), `${branch}:${branch}`], { cwd: path.resolve(repoPath) });
+// Pull a completed branch back into the real repo WITHOUT pushing: fetch from the clone into the
+// source. The real repo is only ever a fetch destination, never a push target. When the verified
+// commit OID is known, assert the landed tip equals it — so a branch repointed between our commit
+// and this fetch (an escaped background child) can't slip a different commit into the source (round 14).
+export function fetchBranchBack(repoPath, clonePath, branch, expectedOid) {
+  const repo = path.resolve(repoPath);
+  execFileSync('git', ['fetch', '--quiet', path.resolve(clonePath), `${branch}:${branch}`], { cwd: repo });
+  if (expectedOid) {
+    const landed = execFileSync('git', ['rev-parse', branch], { cwd: repo }).toString().trim();
+    if (landed !== expectedOid) throw new Error(`shipped branch ${branch} landed ${landed} != verified ${expectedOid} — refusing (post-verify tampering)`);
+  }
 }

@@ -101,9 +101,10 @@ function cardDeps(card, voice) {
       git(clonePath, 'config', 'user.email', 'ghost@ghosttype.local');
       git(clonePath, 'config', 'user.name', 'Ghost Type');
       const msg = `ghost: ${String(card.goal).slice(0, 60)}`;
-      if (tree && baseRef) { commitTreeRef(git, clonePath, branch, tree, baseRef, msg); return; }   // hook-free ship (round 13)
+      if (tree && baseRef) return commitTreeRef(git, clonePath, branch, tree, baseRef, msg);   // hook-free ship → returns OID (round 13/14)
       try { git(clonePath, 'checkout', '-B', branch); } catch { /* already */ }
       if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', msg); }
+      return git(clonePath, 'rev-parse', 'HEAD').trim();
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
     // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1);
@@ -213,7 +214,10 @@ async function main() {
           const lineageFile = path.join(REPORT_DIR, `lineage-${card.project}.jsonl`);
           deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
           const r = await runCard(card, deps);
-          if (r.mergeReady) fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch);
+          if (r.mergeReady) {
+            try { fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch, r.commitOid); }
+            catch (e) { console.error('⚠', e.message); r.mergeReady = false; r.whyLine = 'post-verify tampering detected — not merge-ready'; }
+          }
           results.push(r);
           const post = gov.check(Date.now());
           if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }
