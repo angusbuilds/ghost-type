@@ -22,7 +22,7 @@ night: every time the agent stops, Ghost Type writes the **next** prompt — phr
 test actually passes. In the morning you get branches to review, not an empty terminal.
 
 <p align="center">
-  <img src="assets/menu-bar-app.png" width="360" alt="GhostType menu-bar app — pick a session, it turns purple and drives it">
+  <img src="assets/menu-bar-app.png" width="360" alt="GhostType menu-bar app — pick a session and it turns purple to mark it">
 </p>
 
 It ships as a native macOS **menu-bar app**: pick a terminal session and that pane turns purple
