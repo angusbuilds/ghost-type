@@ -17,28 +17,36 @@ import { sandboxNetDeny } from './sandbox.mjs';
 // dirty submodule (its inner bytes can affect the test but aren't in the tree). Returns a tree OID.
 const STERILE = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'core.autocrlf=false'];
 export function sterileTree(clonePath) {
-  const run = (env, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, env, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+  const run = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+  const hashStdin = (input) => execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
   // tracked + untracked, minus .gitignore'd — NUL-delimited so odd filenames are safe.
-  const files = run(process.env, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-  const idx = path.join(clonePath, '.git', `ghost-idx-${crypto.randomBytes(6).toString('hex')}`);
-  const env = { ...process.env, GIT_INDEX_FILE: idx };
-  try {
-    for (const f of files) {
-      const abs = path.join(clonePath, f);
-      let st;
-      try { st = fs.lstatSync(abs); } catch { continue; }   // vanished between listing and hashing
-      if (st.isDirectory()) throw new Error(`dirty/embedded submodule at ${f} — refusing (its bytes aren't in the frozen tree)`);
-      let oid, mode;
-      if (st.isSymbolicLink()) {
-        mode = '120000';
-        oid = execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input: fs.readlinkSync(abs), stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
-      } else {
-        mode = (st.mode & 0o111) ? '100755' : '100644';
-        oid = run(process.env, 'hash-object', '-w', '--no-filters', '--', abs).trim();   // RAW bytes, no filter
-      }
-      run(env, 'update-index', '--add', '--cacheinfo', `${mode},${oid},${f}`);
+  const files = run(undefined, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
+  const indexLines = [];      // "<mode> <oid>\t<path>" for update-index --index-info
+  const batch = [];           // regular files hashed together in ONE git process
+  for (const f of files) {
+    let st;
+    try { st = fs.lstatSync(path.join(clonePath, f)); } catch { continue; }   // vanished between listing and hashing
+    if (st.isDirectory()) throw new Error(`dirty/embedded submodule at ${f} — refusing (its bytes aren't in the frozen tree)`);
+    if (st.isSymbolicLink()) {
+      indexLines.push(`120000 ${hashStdin(fs.readlinkSync(path.join(clonePath, f)))}\t${f}`);
+    } else if (f.includes('\n')) {
+      // hash-object --stdin-paths is newline-delimited, so a filename WITH a newline is hashed alone.
+      indexLines.push(`${(st.mode & 0o111) ? '100755' : '100644'} ${hashStdin(fs.readFileSync(path.join(clonePath, f)))}\t${f}`);
+    } else {
+      batch.push({ f, mode: (st.mode & 0o111) ? '100755' : '100644' });
     }
-    return run(env, 'write-tree').trim();
+  }
+  // Batch-hash all ordinary files in ONE process (was one spawn/file — 6.8s → ~0.1s for 400 files).
+  if (batch.length) {
+    const oids = run(batch.map(b => path.join(clonePath, b.f)).join('\n') + '\n', 'hash-object', '-w', '--no-filters', '--stdin-paths').trim().split('\n');
+    batch.forEach((b, i) => indexLines.push(`${b.mode} ${oids[i]}\t${b.f}`));
+  }
+  // Build the throwaway index in ONE update-index --index-info, then write the tree.
+  const idx = path.join(clonePath, '.git', `ghost-idx-${crypto.randomBytes(6).toString('hex')}`);
+  const withIdx = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, env: { ...process.env, GIT_INDEX_FILE: idx }, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+  try {
+    if (indexLines.length) withIdx(indexLines.join('\n') + '\n', 'update-index', '--index-info');
+    return withIdx(undefined, 'write-tree').trim();
   } finally { try { fs.unlinkSync(idx); } catch { /* best effort */ } }
 }
 
