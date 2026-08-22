@@ -11,6 +11,16 @@ test('sanitizeInjection keeps a clean line, rejects control chars/newlines/empty
   assert.equal(sanitizeInjection('x'.repeat(700)), null);                 // over the ceiling
 });
 
+test('sanitizeInjection strips Unicode newline-class + C1 controls, not just ASCII (round 31)', () => {
+  const C = String.fromCharCode;
+  // The ASCII-only strip let U+2028 (line sep), U+2029 (para sep), U+0085 (NEL), and the C1
+  // control block through — the writer engine could emit them, breaking the single-printable-line
+  // guarantee this function exists to enforce before typing into a live terminal.
+  for (const code of [0x2028, 0x2029, 0x0085, 0x009f]) {
+    assert.equal(sanitizeInjection('keep' + C(code) + 'going'), 'keepgoing', `U+${code.toString(16).padStart(4, '0')} must be stripped`);
+  }
+});
+
 test('driveStep rejects unsafe generated text instead of typing it', async () => {
   const sent = [];
   const r = await driveStep({ paneId: '%3', goal: 'g', prev: 'agent output here', deps: {
