@@ -155,6 +155,24 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
       return { pass: false, detail: { testOutput: `refusing: submodule ${line.split('\t').slice(1).join('\t')} was added/changed — its nested commit can't be published, so the shipped branch would reference an unavailable object (round 19 A1)` } };
     }
   }
+  // EFFECTIVE check-in-attribute guard. The scan-time dossier check reads only the root
+  // `.gitattributes`; `git check-attr` here consults NESTED .gitattributes, repo/global/system config,
+  // AND candidate-ADDED attributes, and it runs at EVERY entrypoint that reaches verifyCard. A file
+  // with an effective `filter` (LFS/clean-smudge), `working-tree-encoding`, or `ident` attribute would
+  // have a canonical blob that differs from the raw worktree bytes the sterile snapshot ships — refuse,
+  // fail-closed (round 20 #2). Paths are enumerated NUL-safe; check-attr emits `path\0attr\0info\0` triples.
+  const attrPaths = execFileSync('git', [...STERILE, 'ls-files', '-z'], { cwd: clonePath }).toString()
+                  + execFileSync('git', [...STERILE, 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: clonePath }).toString();
+  if (attrPaths) {
+    const parts = execFileSync('git', [...STERILE, 'check-attr', 'filter', 'working-tree-encoding', 'ident', '-z', '--stdin'],
+      { cwd: clonePath, input: attrPaths, maxBuffer: 64 * 1024 * 1024 }).toString().split('\0');
+    for (let i = 0; i + 2 < parts.length; i += 3) {
+      const [p, attr, info] = [parts[i], parts[i + 1], parts[i + 2]];
+      if (p && info !== 'unspecified' && info !== 'unset') {
+        return { pass: false, detail: { testOutput: `refusing: ${p} has an effective '${attr}=${info}' check-in attribute — the raw-byte snapshot would ship a noncanonical blob (LFS/filter/encoding repos are unsupported; round 20 #2)` } };
+      }
+    }
+  }
   // acceptanceTimeoutSec (from the governor's remaining time) caps the test so it can't run its
   // full card timeout past the nightly deadline (round 8 Medium).
   const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);

@@ -167,6 +167,22 @@ test('verifyCard catches a changed gitlink even when diff.ignoreSubmodules=all w
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+test('verifyCard refuses an effective filter attribute from a NESTED/candidate-added .gitattributes the scan misses (round 20 #2)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-attr-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.js'), 'export const x = 1;'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  // the candidate adds a NESTED .gitattributes applying an LFS filter + a matching file (root scan misses this)
+  fs.mkdirSync(path.join(d, 'assets'));
+  fs.writeFileSync(path.join(d, 'assets', '.gitattributes'), '*.bin filter=lfs -text\n');
+  fs.writeFileSync(path.join(d, 'assets', 'model.bin'), 'BINARY-BYTES');
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'add a model', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(v.pass, false);
+  assert.match(v.detail.testOutput, /effective 'filter|check-in attribute|noncanonical/i);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('foreignIgnoredState: ignored dependency dirs are reapable, candidate-created ignored files are NOT (round 19 A3)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fig-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
@@ -423,21 +439,23 @@ test('destructiveDiffReason closes the round-11 lexical gaps', () => {
   assert.match(destructiveDiffReason('refactor parser and remove dead code', '0\t1000\tsrc/parser.js', 'M\tsrc/parser.js'), /1000 net lines/);
 });
 
-test('verifyCard freeze DISABLES a candidate clean filter — ships the tested bytes, not filter output (round 14 Critical)', async () => {
+test('verifyCard REFUSES a candidate with an effective clean filter — never executes it, never ships noncanonical bytes (round 14 mechanism + round 20 #2)', async () => {
   const d = tmpGit();
   const g = (...a) => execFileSync('git', a, { cwd: d });
   const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
-  // candidate installs a malicious clean filter that would replace ALL content with "PWNED"
+  // a clean filter that would replace ALL content with "PWNED" (arbitrary code on `git add`)
   g('config', 'filter.evil.clean', 'sed "s/.*/PWNED/"');
   fs.writeFileSync(path.join(d, '.gitattributes'), 'feature.js filter=evil\n');
   fs.writeFileSync(path.join(d, 'feature.js'), 'the real tested content');
   const card = { goal: 'add a feature', acceptanceArgv: ['node', '-e', 'process.exit(0)'], acceptanceTimeoutSec: 20 };
   const v = await verifyCard(card, d, { baseRef: base });
-  assert.equal(v.pass, true);
-  // the frozen/shipped tree must hold the RAW worktree bytes, not the filter's "PWNED"
-  const blob = execFileSync('git', ['cat-file', '-p', `${v.tree}:feature.js`], { cwd: d }).toString();
+  assert.equal(v.pass, false);                                  // a filtered candidate is now REFUSED, not shipped (round 20 #2)
+  assert.match(v.detail.testOutput, /filter|check-in attribute/i);
+  // and the round-14 mechanism still holds: sterileTree hashes RAW bytes — the filter is NEVER executed
+  const tree = sterileTree(d);
+  const blob = execFileSync('git', ['cat-file', '-p', `${tree}:feature.js`], { cwd: d }).toString();
   assert.match(blob, /the real tested content/);
-  assert.doesNotMatch(blob, /PWNED/);
+  assert.doesNotMatch(blob, /PWNED/);                           // the malicious clean filter never ran
   fs.rmSync(d, { recursive: true, force: true });
 });
 
