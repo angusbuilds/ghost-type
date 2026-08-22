@@ -178,6 +178,17 @@ test('sterileTree REFUSES a case-only rename done outside git (index foo.js, dis
   fs.rmSync(d, { recursive: true, force: true });
 });
 
+test('sterileTree REFUSES a case-only rename of a SUBMODULE directory (the gitlink path bypasses addWorktree) (round 25)', () => {
+  const { main } = mkSubmoduleRepo('gt-subcase-');
+  fs.renameSync(path.join(main, 'sub'), path.join(main, 'Sub'));    // case-only rename of the gitlink dir, no git mv
+  if (fs.existsSync(path.join(main, 'sub'))) {                      // case-insensitive FS: sub resolves to Sub
+    assert.throws(() => sterileTree(main), /case-only rename|on-disk spelling/i);   // gitlink-path case check refuses it
+  } else {
+    assert.throws(() => sterileTree(main));                         // case-sensitive: Sub is an untracked nested repo → also refused
+  }
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
 test('sterileTree REFUSES a PARENT-directory case-only rename (mv src Src), not just a leaf filename (round 24)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-casedir-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });

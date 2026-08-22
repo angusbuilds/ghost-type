@@ -77,6 +77,10 @@ export function sterileTree(clonePath) {
       // path FIRST: a deletion or a type-change must not silently ship the stale recorded commit (round 18 #3).
       let sst;
       try { sst = fs.lstatSync(sub); } catch { continue; }    // path gone → a real deletion; omit the gitlink
+      // The gitlink path goes straight to the tree (not through addWorktree), so case-check it here too —
+      // a case-only rename of the submodule or a PARENT dir (`mv deps Deps`) would otherwise ship the
+      // gitlink under the stale spelling while disk differs, breaking on a case-sensitive system (round 25).
+      if (!existsExactCase(f)) throw new Error(`submodule path ${f} differs from its on-disk spelling (case-only rename outside git?) — refusing (the rename isn't in the frozen tree)`);
       if (!sst.isDirectory()) { addWorktree(f); continue; }   // replaced by a file/symlink → snapshot THAT, not the old commit
       if (fs.existsSync(path.join(sub, '.git'))) {
         // Initialized submodule: HEAD must match the recorded commit AND its worktree must be clean, else
