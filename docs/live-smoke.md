@@ -61,3 +61,27 @@ Confirm the branch landed without a push:
 ```bash
 cd /tmp/ghost-smoke && git branch --list 'ghost/*'
 ```
+
+## Sandbox verification (opt-in `sandbox` flag)
+
+With `"sandbox": true`, both jails are enforced by macOS `sandbox-exec`. To re-verify (macOS):
+
+```bash
+# coding session: writes confined to the clone, network still up
+CLONE=$(mktemp -d)
+node -e 'import("./src/sandbox.mjs").then(({sandboxWriteConfine})=>{
+  const {spawnSync}=require("node:child_process"); const c=process.argv[1];
+  const a=sandboxWriteConfine(["node","-e",`try{require("fs").writeFileSync(process.env.HOME+"/.probe","x");console.log("BAD: external write")}catch(e){console.log("external write BLOCKED",e.code)};require("fs").writeFileSync("${c}/in.txt","y");console.log("clone write OK")`],c);
+  const r=spawnSync(a[0],a.slice(1),{encoding:"utf8"}); process.stdout.write(r.stdout+r.stderr);
+})' "$CLONE"
+# Expect: "external write BLOCKED EPERM" and "clone write OK"
+
+# acceptance test: network denied
+node -e 'import("./src/verifier.mjs").then(async ({runAcceptance})=>{
+  const r=await runAcceptance(["node","-e","const s=require(\"net\").connect(53,\"1.1.1.1\");s.on(\"connect\",()=>process.exit(0));s.on(\"error\",()=>process.exit(7));setTimeout(()=>process.exit(8),3000)"],process.cwd(),15,undefined,true);
+  console.log("network under sandbox → pass:",r.pass,"(want false)");
+})'
+```
+
+Verified on 2026-08-21: a real `claude -p` session runs to `subtype:success` under the
+write-confinement profile (it can create files in the clone) and cannot write outside it.
