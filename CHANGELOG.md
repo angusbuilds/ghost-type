@@ -112,6 +112,29 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
   no longer drops its spend); a fetch-back failure parks with the real error, not a false "shipped".
 - **Newline-in-filename** paths snapshot via NUL-delimited `update-index -z --index-info`.
 
+### Hardening (rounds 21–28 + self-audit)
+Rounds 21–27 finished the snapshot to the niche tail (case-only renames across every path — leaf,
+parent dir, gitlink; nested untracked repos; non-ignored empty dirs git can't store — all refused).
+**Round 28 broadened the audit past the verifier and found the loop's real bugs:**
+- **The token cap actually counts now** — usage summed only input+output, undercounting a cached
+  Claude call ~300× (937 vs 285,759). It sums all four buckets (incl. both cache tiers).
+- **A card can reach its iteration budget** — a failing acceptance test used to trip the
+  consecutive-*engine*-error breaker, parking a 6-iteration card at 3. Test failures now count only
+  against the card's iterations; the breaker is scoped to real engine/transport failures.
+- **Usage limits are handled, not misread** — Claude reports a limit as the contradictory
+  `subtype:success, is_error:true`; Codex as `turn.failed`. Both were misclassified (done / generic
+  error) and are now rate-limited (the night waits for the real reset, parsed from absolute clock
+  times too). One shared `engineFailed()` also stops a limit message from leaking into the next
+  prompt, a preflight candidate, a proposal plan, or the learned voice profile.
+- **It can actually run your repo** — the agent may now install the clone's missing dependencies
+  (`git clone` omits `node_modules`), scoped to the detected package manager's install verb, in both
+  default and sandbox modes. The package manager is detected (pnpm/yarn/bun), not assumed to be npm.
+- **The voice stays yours** — learning excludes sidechain/daemon/Ghost-authored rows (verified 0
+  leaks against the real corpus); a failed `ghost learn` no longer overwrites the profile with an
+  error string; the situation-specific exemplar is never dropped.
+- **Nothing is silently lost** — proposal cards write a real `PLAN.md`; cards unstarted after a
+  governor trip are reported `skipped`; a same-day rerun ships a sibling branch, not a lost non-ff.
+
 ### Proof
 - 294 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
