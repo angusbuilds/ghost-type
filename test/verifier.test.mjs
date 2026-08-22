@@ -218,6 +218,15 @@ test('destructiveDiffReason closes the round-11 lexical gaps', () => {
   assert.match(destructiveDiffReason('refactor parser and remove dead code', '0\t1000\tsrc/parser.js', 'M\tsrc/parser.js'), /1000 net lines/);
 });
 
+test('verifyCard fails CLOSED when it cannot snapshot the candidate tree (round 12 High)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nogit-'));   // NOT a git repo → freeze fails
+  const card = { goal: 'add a feature', acceptanceArgv: ['node', '-e', 'process.exit(0)'], acceptanceTimeoutSec: 20 };
+  const v = await verifyCard(card, d, { baseRef: 'HEAD' });
+  assert.equal(v.pass, false);   // a freeze failure must refuse, not skip the mutation check
+  assert.match(v.detail.testOutput, /could not snapshot|refusing/);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('verifyCard refuses a test that ERASES an UNTRACKED candidate file (round 11 High)', async () => {
   const d = tmpGit();
   const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();

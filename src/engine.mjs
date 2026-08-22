@@ -169,13 +169,16 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
       // ANY nonzero exit or signal (code === null) is a transport failure → no result, so the
       // watcher classifies it 'errored' (retry-capped), never a soft looping 'stalled'. The text
       // is still returned so rate/network detection can read it (Codex round 3 #6).
-      const exitCode = code == null ? 1 : code;
-      const crashed = exitCode !== 0 || p.turnFailed;
       // A coding turn succeeds via TOOL CALLS and often has no final agent_message, so success is
       // exit 0 + turn.completed + no turn.failed — NOT the presence of assistant text (round 11).
+      // A truncated/protocol-invalid turn (exit 0 but NO turn.completed) or a turn.failed is NOT
+      // success; force a nonzero exit so the watcher classifies it 'errored', never a soft 'stalled' (round 12).
+      const rawExit = code == null ? 1 : code;
+      const ok = rawExit === 0 && p.turnCompleted && !p.turnFailed;
+      const exitCode = ok ? 0 : (rawExit === 0 ? 1 : rawExit);
       finish({
         exitCode,
-        result: crashed ? null : { subtype: 'success', result: text || 'codex turn completed' },
+        result: ok ? { subtype: 'success', result: text || 'codex turn completed' } : null,
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
           output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,

@@ -47,7 +47,8 @@ const deps = {
     git(clonePath, 'config', 'user.name', 'Ghost Type');
     try { git(clonePath, 'checkout', '-B', branch); } catch { /* already there */ }
     const dirty = git(clonePath, 'status', '--porcelain').trim();
-    if (dirty) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '-m', `ghost: ${card.goal.slice(0, 60)}`); }
+    // --no-verify: a pre-commit hook must not rewrite the verified tree before shipping (round 12).
+    if (dirty) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', `ghost: ${card.goal.slice(0, 60)}`); }
   },
   gitDiff: (cwd) => ({
     stat: git(cwd, 'diff', '--shortstat', 'HEAD'),

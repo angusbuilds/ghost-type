@@ -62,6 +62,18 @@ test('runCodex marks a crash with NO result so the watcher treats it as errored 
   assert.equal(r.result, null);   // no synthesized result → classifyOutcome → 'errored', not 'stalled'
 });
 
+test('an exit-0 turn with NO turn.completed is NOT success — forced to errored (round 12)', async () => {
+  const r = await runCodex({ cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'no-events' }, bin: FAKE });
+  assert.equal(r.result, null);      // truncated/invalid turn → no synthesized success
+  assert.notEqual(r.exitCode, 0);    // forced nonzero so the watcher classifies it 'errored', not 'stalled'
+});
+
+test('a stall (turn.completed but did not fix it) IS a completed turn → success, graded by verify (round 12)', async () => {
+  const r = await runCodex({ cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'stall' }, bin: FAKE });
+  assert.equal(r.exitCode, 0);
+  assert.equal(r.result.subtype, 'success');   // the turn completed; the acceptance test is what fails it
+});
+
 test('runAgent dispatches to codex when engine=codex', async () => {
   const r = await runAgent({ engine: 'codex', cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'success' }, bin: FAKE });
   assert.equal(r.result.subtype, 'success');

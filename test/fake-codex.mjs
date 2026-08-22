@@ -14,7 +14,10 @@ if (scenario === 'success') {
   process.exit(0);
 } else if (scenario === 'stall') {
   line({ type: 'item.completed', item: { id: 'i0', type: 'agent_message', text: 'could not resolve the failure' } });
+  line({ type: 'turn.completed', usage: { input_tokens: 50, output_tokens: 10 } });   // a completed turn that didn't fix it
   process.exit(0);
+} else if (scenario === 'no-events') {
+  process.exit(0);   // exit 0 but emits nothing — a truncated/invalid turn, must NOT be success (round 12)
 } else if (scenario === 'crash') {
   process.stderr.write('codex: fatal error\n');
   process.exit(1);

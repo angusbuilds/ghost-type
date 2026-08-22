@@ -51,18 +51,19 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // in place, or committing a different tree all change the hash (round 11: the round-10 filename-
   // only check missed untracked deletion + corruption + commit-over).
   const freeze = () => { git(clonePath, 'add', '-A'); return git(clonePath, 'write-tree').trim(); };
-  let treeBefore = null;
-  try { treeBefore = freeze(); } catch { /* non-git clone → skip the freeze, guards below still run */ }
+  // FAIL CLOSED: every real caller is a git clone, so a freeze failure (e.g. a stale
+  // .git/index.lock a rigged test could exploit) must refuse verification, not skip the mutation
+  // check and let an empty diff ship (round 12).
+  let treeBefore;
+  try { treeBefore = freeze(); }
+  catch (e) { return { pass: false, detail: { testOutput: `could not snapshot the candidate for verification — refusing: ${e.message}` } }; }
   // acceptanceTimeoutSec (from the governor's remaining time) caps the test so it can't run its
   // full card timeout past the nightly deadline (round 8 Medium).
   const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);
   if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead || 'test failed' } };
   // A rigged test that erased/rewrote its own changes to fake a pass now shows a different tree.
-  if (treeBefore) {
-    const treeAfter = freeze();
-    if (treeBefore !== treeAfter) {
-      return { pass: false, detail: { testOutput: 'acceptance changed the candidate tree — refusing: a test must not rewrite or erase the patch' } };
-    }
+  if (treeBefore !== freeze()) {
+    return { pass: false, detail: { testOutput: 'acceptance changed the candidate tree — refusing: a test must not rewrite or erase the patch' } };
   }
   // Destructive-change guard on the STAGED diff, which now includes the untracked new files too
   // (so a build goal that only adds new files isn't misread as net-negative).
@@ -126,7 +127,7 @@ const TESTISH = /(^|\/)(tests?|spec|__tests__)\/|(^|\/)test[_-][^/]+\.[a-z]+$|[.
 export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   const g = String(goal);
   const hasDeletion = DELETION_GOAL.test(g);
-  const hasBuildOrFix = BUILD_GOAL.test(g) || /\b(fix(ed|es|ing)?|repair|resolve|correct|patch|debug|refactor|rework|update|improve)\b/i.test(g);
+  const hasBuildOrFix = BUILD_GOAL.test(g) || /\b(fix(ed|es|ing)?|repair(ed|s|ing)?|resolv(e|ed|es|ing)|correct|patch|debug|refactor(ed|s|ing)?|rework(ed|s|ing)?|updat(e|ed|es|ing)|improv(e|ed|es|ing)|rewrite|rewrote|rewriting|modernize|migrate)\b/i.test(g);
   // ONLY a pure deletion goal (deletion words, no build/fix intent) disables the size/binary
   // guards — a MIXED goal like "fix parser and remove a debug log" must not (round 9/10 High).
   const pureDeletionGoal = hasDeletion && !hasBuildOrFix;
@@ -135,7 +136,7 @@ export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   // Rejects "fix the failing parser test" (no deletion word) and "remove debug logging and fix
   // parser tests" (a clause break separates them), while allowing "remove the flaky parser test"
   // (round 9/10 High).
-  const testRemovalIntent = /\b(delete|remove|drop|prune|strip|deprecate)\b(?:(?!\b(?:and|but|then|or|also|plus|while|when|so|as|to|for|after|before)\b)[^.;,\n]){0,40}\b(tests?|specs?)\b/i.test(g);
+  const testRemovalIntent = /\b(delete|remove|drop|prune|strip|deprecate)\b(?:(?!\b(?:and|but|then|or|also|plus|while|when|so|as|to|for|after|before|because|if|although|though|yet)\b)[^.;,\n]){0,40}\b(tests?|specs?)\b/i.test(g);
   // Map each file to its numstat so we can tell a binary deletion (`-\t-`) from a text one.
   const sizes = {};
   for (const l of String(numstat).split('\n')) {

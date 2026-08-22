@@ -101,7 +101,9 @@ function cardDeps(card, voice) {
       git(clonePath, 'config', 'user.email', 'ghost@ghosttype.local');
       git(clonePath, 'config', 'user.name', 'Ghost Type');
       try { git(clonePath, 'checkout', '-B', branch); } catch { /* already */ }
-      if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '-m', `ghost: ${String(card.goal).slice(0, 60)}`); }
+      // --no-verify: never let a (planted or benign) pre-commit hook rewrite the verified tree
+      // between verification and shipping (round 12).
+      if (git(clonePath, 'status', '--porcelain').trim()) { git(clonePath, 'add', '-A'); git(clonePath, 'commit', '-q', '--no-verify', '-m', `ghost: ${String(card.goal).slice(0, 60)}`); }
     },
     gitDiff: (cwd) => ({ stat: git(cwd, 'diff', '--shortstat', 'HEAD'), excerpt: git(cwd, 'diff', 'HEAD').slice(0, 12000) }),
     // Shared, centralized verifier — acceptance test + deletion guard (round 4 #1 / round 5 H1);
