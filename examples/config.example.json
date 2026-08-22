@@ -5,7 +5,7 @@
     "maxCostUsd": "positive number — hard nightly dollar ceiling (the overnight-bill kill-switch)",
     "nightDeadlineHour": "integer 0-23 — local hour the night hard-stops",
     "maxConsecErrors": "integer >= 1 — consecutive engine errors before the breaker trips",
-    "humanIdleThreshold": "number >= 0 — seconds of no input before haunt-drive may type",
+    "humanIdleThreshold": "number >= 5 — seconds of no input before haunt-drive may type (a lower value is rejected: 0 would let a failed idle probe look idle and type over a present human)",
     "maxCards": "integer >= 1 — cards per arm when no single project is named",
     "backpressureThreshold": "integer >= 1 — unmerged ghost/* branches before a project is paused",
     "pollMs": "integer 250-600000 — haunt-drive poll interval",
