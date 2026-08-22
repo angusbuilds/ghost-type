@@ -3,6 +3,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree } from '../src/verifier.mjs';
 
+test('sterileTree stores a symlink as a link blob (mode 120000, content=target), not by following it (round 15)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-sl-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'target.txt'), 'the target content'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  fs.symlinkSync('target.txt', path.join(d, 'link'));   // candidate adds a symlink
+  const tree = sterileTree(d);
+  assert.match(execFileSync('git', ['ls-tree', tree, 'link'], { cwd: d }).toString(), /^120000 blob/);   // stored AS a symlink
+  assert.equal(execFileSync('git', ['cat-file', '-p', `${tree}:link`], { cwd: d }).toString(), 'target.txt');  // content = target path, not followed
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('sterileTree hashes DISK bytes, defeating the assume-unchanged index trick (round 15 High)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-st-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
