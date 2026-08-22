@@ -19,23 +19,38 @@ const STERILE = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
 export function sterileTree(clonePath) {
   const run = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
   const hashStdin = (input) => execFileSync('git', [...STERILE, 'hash-object', '-w', '--stdin'], { cwd: clonePath, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
-  // tracked + untracked, minus .gitignore'd — NUL-delimited so odd filenames are safe.
-  const files = run(undefined, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
   const indexLines = [];      // "<mode> <oid>\t<path>" for update-index --index-info
   const batch = [];           // regular files hashed together in ONE git process
-  for (const f of files) {
+  // Add ONE worktree entry, re-hashing from DISK (defeats stale-index tricks). Rejects special
+  // files (FIFO/socket/device) whose `git hash-object` would block the daemon forever (round 16).
+  const addWorktree = (f) => {
     let st;
-    try { st = fs.lstatSync(path.join(clonePath, f)); } catch { continue; }   // vanished between listing and hashing
-    if (st.isDirectory()) throw new Error(`dirty/embedded submodule at ${f} — refusing (its bytes aren't in the frozen tree)`);
-    if (st.isSymbolicLink()) {
-      indexLines.push(`120000 ${hashStdin(fs.readlinkSync(path.join(clonePath, f)))}\t${f}`);
-    } else if (f.includes('\n')) {
-      // hash-object --stdin-paths is newline-delimited, so a filename WITH a newline is hashed alone.
-      indexLines.push(`${(st.mode & 0o111) ? '100755' : '100644'} ${hashStdin(fs.readFileSync(path.join(clonePath, f)))}\t${f}`);
-    } else {
-      batch.push({ f, mode: (st.mode & 0o111) ? '100755' : '100644' });
-    }
+    try { st = fs.lstatSync(path.join(clonePath, f)); } catch { return; }   // vanished between listing and hashing
+    if (st.isSymbolicLink()) { indexLines.push(`120000 ${hashStdin(fs.readlinkSync(path.join(clonePath, f)))}\t${f}`); return; }
+    if (!st.isFile()) throw new Error(`refusing to snapshot special file (FIFO/socket/device/dir) at ${f}`);
+    const mode = (st.mode & 0o111) ? '100755' : '100644';
+    if (f.includes('\n')) indexLines.push(`${mode} ${hashStdin(fs.readFileSync(path.join(clonePath, f)))}\t${f}`);   // stdin-paths is newline-delimited
+    else batch.push({ f, mode });
+  };
+  // Tracked entries WITH modes so a submodule GITLINK (160000) is PRESERVED by its recorded commit
+  // — a normal repo containing a submodule must still snapshot faithfully (round 16). A gitlink whose
+  // checked-out HEAD no longer matches the recorded commit is refused (its real bytes aren't captured).
+  for (const line of run(undefined, 'ls-files', '--stage', '-z').split('\0').filter(Boolean)) {
+    const m = line.match(/^(\d+) ([0-9a-f]+) \d+\t([\s\S]*)$/);
+    if (!m) continue;
+    const [, mode, oid, f] = m;
+    if (mode === '160000') {
+      const sub = path.join(clonePath, f);
+      if (fs.existsSync(path.join(sub, '.git'))) {
+        let head = '';
+        try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim(); } catch { /* uninitialized */ }
+        if (head && head !== oid) throw new Error(`submodule ${f} HEAD ${head} != recorded ${oid} — refusing (its bytes aren't in the frozen tree)`);
+      }
+      indexLines.push(`160000 ${oid}\t${f}`);
+    } else addWorktree(f);
   }
+  // Untracked new files (respecting .gitignore).
+  for (const f of run(undefined, 'ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean)) addWorktree(f);
   // Batch-hash all ordinary files in ONE process (was one spawn/file — 6.8s → ~0.1s for 400 files).
   if (batch.length) {
     const oids = run(batch.map(b => path.join(clonePath, b.f)).join('\n') + '\n', 'hash-object', '-w', '--no-filters', '--stdin-paths').trim().split('\n');
@@ -107,7 +122,12 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   const r = await runAcceptance(card.acceptanceArgv, clonePath, acceptanceTimeoutSec ?? card.acceptanceTimeoutSec, undefined, sandbox);
   if (!r.pass) return { pass: false, detail: { testOutput: r.stderrHead || 'test failed' } };
   // A rigged test that erased/rewrote its own changes to fake a pass now shows a different tree.
-  if (treeBefore !== freeze()) {
+  // A snapshot failure here (e.g. the test planted a special file) is a clean REFUSAL, not an
+  // uncaught throw out of verifyCard (round 16).
+  let treeAfter;
+  try { treeAfter = freeze(); }
+  catch (e) { return { pass: false, detail: { testOutput: `could not re-snapshot the candidate after acceptance — refusing: ${e.message}` } }; }
+  if (treeBefore !== treeAfter) {
     return { pass: false, detail: { testOutput: 'acceptance changed the candidate tree — refusing: a test must not rewrite or erase the patch' } };
   }
   // Destructive-change guard on the frozen tree (baseRef → treeBefore, so untracked additions
@@ -130,9 +150,12 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
 // Cheapest guard: did the working tree actually change vs the base commit the session
 // started from? An empty patch fails fast without spending a full acceptance-test run.
 export function patchApplied(clonePath, baseRef) {
-  const out = execFileSync('git', ['status', '--porcelain'], { cwd: clonePath }).toString().trim();
+  // Run status/diff STERILE (fsmonitor/hooks off, no ext-diff/textconv) so a candidate config
+  // can't execute a helper in the daemon before verification is even reached (round 16 b).
+  const s = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+  const out = execFileSync('git', [...s, 'status', '--porcelain'], { cwd: clonePath }).toString().trim();
   if (out) return true;
-  const diff = execFileSync('git', ['diff', '--stat', `${baseRef}..HEAD`], { cwd: clonePath }).toString().trim();
+  const diff = execFileSync('git', [...s, 'diff', '--no-ext-diff', '--no-textconv', '--stat', `${baseRef}..HEAD`], { cwd: clonePath }).toString().trim();
   return diff.length > 0;
 }
 

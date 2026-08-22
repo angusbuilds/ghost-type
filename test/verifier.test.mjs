@@ -15,6 +15,39 @@ test('sterileTree stores a symlink as a link blob (mode 120000, content=target),
   fs.rmSync(d, { recursive: true, force: true });
 });
 
+test('sterileTree preserves a submodule GITLINK (mode 160000) — a repo with a submodule snapshots faithfully (round 16)', () => {
+  const main = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-sm-'));
+  const gm = (...a) => execFileSync('git', a, { cwd: main });
+  gm('init', '-q'); gm('config', 'user.email', 't@t'); gm('config', 'user.name', 't');
+  fs.writeFileSync(path.join(main, 'a.txt'), 'hi'); gm('add', '-A'); gm('commit', '-q', '-m', 'base');
+  // a nested git repo → git records it as a gitlink when added
+  const sub = path.join(main, 'sub'); fs.mkdirSync(sub);
+  const gs = (...a) => execFileSync('git', a, { cwd: sub });
+  gs('init', '-q'); gs('config', 'user.email', 't@t'); gs('config', 'user.name', 't');
+  fs.writeFileSync(path.join(sub, 'x'), '1'); gs('add', '-A'); gs('commit', '-q', '-m', 'sub');
+  const subHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub }).toString().trim();
+  execFileSync('git', ['-c', 'protocol.file.allow=always', 'add', 'sub'], { cwd: main });   // add as gitlink
+  const tree = sterileTree(main);
+  const ls = execFileSync('git', ['ls-tree', tree, 'sub'], { cwd: main }).toString();
+  assert.match(ls, /^160000 commit/);           // the gitlink is preserved, not refused or omitted
+  assert.ok(ls.includes(subHead));              // pointing at the submodule's recorded commit
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('sterileTree does NOT hang on an untracked FIFO — git omits it from ls-files (round 16)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fifo-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.txt'), 'hi'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  execFileSync('mkfifo', [path.join(d, 'pipe')]);          // git ls-files won't list this...
+  fs.writeFileSync(path.join(d, 'real.js'), 'export const x = 1;');   // ...but there's a real candidate change
+  let tree;
+  assert.doesNotThrow(() => { tree = sterileTree(d); });   // completes instead of blocking on hash-object <fifo>
+  assert.ok(tree);
+  // the (isFile()) special-file guard still refuses one that IS listed (defends a listing→lstat race)
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('sterileTree hashes DISK bytes, defeating the assume-unchanged index trick (round 15 High)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-st-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
