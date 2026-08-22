@@ -210,8 +210,10 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
   // with an effective `filter` (LFS/clean-smudge), `working-tree-encoding`, or `ident` attribute would
   // have a canonical blob that differs from the raw worktree bytes the sterile snapshot ships — refuse,
   // fail-closed (round 20 #2). Paths are enumerated NUL-safe; check-attr emits `path\0attr\0info\0` triples.
-  const attrPaths = execFileSync('git', [...STERILE, 'ls-files', '-z'], { cwd: clonePath, maxBuffer: MAXBUF }).toString()
-                  + execFileSync('git', [...STERILE, 'ls-files', '--others', '--exclude-standard', '-z'], { cwd: clonePath, maxBuffer: MAXBUF }).toString();
+  // Enumerate the paths ACTUALLY IN the frozen tree (what ships), not the index — the index still lists
+  // a tracked file the candidate DELETED, so deleting an LFS/filtered file would otherwise be wrongly
+  // refused even though it's not in the shipped tree (round 29). ls-tree of treeBefore is exactly what ships.
+  const attrPaths = execFileSync('git', [...STERILE, 'ls-tree', '-r', '-z', '--name-only', treeBefore], { cwd: clonePath, maxBuffer: MAXBUF }).toString();
   if (attrPaths) {
     const parts = execFileSync('git', [...STERILE, 'check-attr', 'filter', 'working-tree-encoding', 'ident', '-z', '--stdin'],
       { cwd: clonePath, input: attrPaths, maxBuffer: MAXBUF }).toString().split('\0');

@@ -298,6 +298,21 @@ test('verifyCard refuses an effective filter attribute from a NESTED/candidate-a
   fs.rmSync(d, { recursive: true, force: true });
 });
 
+test('verifyCard does NOT refuse a candidate that DELETES an LFS/filtered file — it is not in the shipped tree (round 29)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-delfilter-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, '.gitattributes'), '*.bin filter=lfs -text\n');
+  fs.writeFileSync(path.join(d, 'asset.bin'), 'BINARY'); fs.writeFileSync(path.join(d, 'a.js'), '1');
+  g('add', '-A'); g('commit', '-q', '-m', 'base with an LFS asset');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  fs.rmSync(path.join(d, 'asset.bin'));                    // delete the ONLY filtered file (worktree deletion, still in index)
+  fs.writeFileSync(path.join(d, 'feature.js'), 'the real change');
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'remove the asset', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(v.pass, true);   // deleted filtered file isn't in the shipped tree → the old ls-files enumeration wrongly refused it
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('hasIgnoredState is true for ANY ignored state incl. inside a dep dir (no allowlist bypass), false when clean (round 20 #3)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-his-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });
