@@ -1,7 +1,7 @@
 // test/verifier.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, hasIgnoredState } from '../src/verifier.mjs';
+import { runAcceptance, netLinesGutted, patchApplied, classifyClaim, suspiciousDeletion, verifyCard, destructiveDiffReason, sterileTree, hasIgnoredState, isNoOpCommand, acceptanceNeutered } from '../src/verifier.mjs';
 
 test('sterileTree stores a symlink as a link blob (mode 120000, content=target), not by following it (round 15)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-sl-'));
@@ -678,5 +678,50 @@ test('verifyCard passes an untracked additive candidate when the test writes onl
   };
   const v = await verifyCard(card, d, { baseRef: base });
   assert.equal(v.pass, true);   // the candidate survived; the ignored artifact didn't count
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('isNoOpCommand flags a neutered test command, not a real runner (round 31 live park run)', () => {
+  // trivially-passing no-ops (the neuter-the-test cheat) → true
+  for (const c of ['exit 0', 'true', ':', '', '   ', 'echo done', 'echo "all good"', 'node -e "process.exit(0)"',
+                   'echo running && exit 0', "node --eval 'process.exit(0)'"]) {
+    assert.equal(isNoOpCommand(c), true, `should be no-op: ${JSON.stringify(c)}`);
+  }
+  // real test commands (incl. legit migrations) → false
+  for (const c of ['vitest run', 'jest', 'mocha test/', 'node --test', 'pytest -q', 'node realtest.js',
+                   'echo running && npm run realtest', 'nyc mocha', 'echo x && exit 1']) {
+    assert.equal(isNoOpCommand(c), false, `should be real: ${JSON.stringify(c)}`);
+  }
+});
+
+test('acceptanceNeutered refuses a scripts.test rewritten to a no-op, allows legit changes (round 31 live park run)', () => {
+  const pm = ['npm', 'test'];
+  // the cheat: a real test script rewritten to trivially pass → refuse
+  assert.match(String(acceptanceNeutered(pm, 'vitest run', 'node -e "process.exit(0)"')), /acceptance|neuter|no-op|test command/i);
+  assert.match(String(acceptanceNeutered(['pnpm', 'test'], 'jest', 'exit 0')), /acceptance|neuter|no-op|test command/i);
+  // legit: unchanged, a real migration, or the acceptance isn't a package-manager test → allow (null)
+  assert.equal(acceptanceNeutered(pm, 'vitest run', 'vitest run'), null);          // unchanged
+  assert.equal(acceptanceNeutered(pm, 'mocha', 'vitest run --coverage'), null);    // real → real migration
+  assert.equal(acceptanceNeutered(pm, 'exit 0', 'true'), null);                    // base was ALREADY a no-op — nothing real to neuter
+  assert.equal(acceptanceNeutered(['node', 'test.js'], 'jest', 'exit 0'), null);   // acceptance isn't a package-manager test script
+  // turning a FAILING placeholder (default `npm init` test) into a passing no-op IS the cheat → refuse
+  assert.match(String(acceptanceNeutered(pm, 'echo "Error: no test specified" && exit 1', 'exit 0')), /neuter|no-op/i);
+});
+
+test('verifyCard REFUSES a candidate that neutered package.json scripts.test even though npm test passes (round 31 live park run)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-neuter-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  // base: a real test script (names a script → not a no-op)
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', scripts: { test: 'node realtest.js' } }, null, 2));
+  fs.writeFileSync(path.join(d, 'realtest.js'), 'process.exit(0)\n');
+  g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = g('rev-parse', 'HEAD').toString().trim();
+  // candidate: rewrite scripts.test into a trivial no-op so `npm test` passes without any real test
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', scripts: { test: 'exit 0' } }, null, 2));
+  const card = { goal: 'add a feature to the widget', acceptanceArgv: ['npm', 'test'], acceptanceTimeoutSec: 30 };
+  const v = await verifyCard(card, d, { baseRef: base });
+  assert.equal(v.pass, false);                                  // npm test passed, but the test was neutered
+  assert.match(v.detail.testOutput, /neuter|no-op/i);
   fs.rmSync(d, { recursive: true, force: true });
 });

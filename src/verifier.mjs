@@ -265,6 +265,16 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
     git(clonePath, ...D, '--numstat', ref, treeBefore, '--').trim(),
     git(clonePath, ...D, '--name-status', ref, treeBefore, '--').trim());
   if (reason) return { pass: false, detail: { testOutput: `test passed but the change looks destructive — refusing (${reason})` } };
+  // Acceptance-integrity backstop: for a `<pm> test` acceptance, refuse a candidate that rewrote a
+  // real package.json scripts.test into a no-op (the neuter-the-test cheat the destructive-diff guard
+  // can't see, since package.json isn't a TESTISH file). Reads the field at base and the frozen tree;
+  // `git show <treeish>:package.json` fails cleanly to null when absent (round 31 live park run).
+  const testScriptAt = (treeish) => {
+    try { return JSON.parse(git(clonePath, ...STERILE, 'show', `${treeish}:package.json`))?.scripts?.test ?? null; }
+    catch { return null; }
+  };
+  const neutered = acceptanceNeutered(card.acceptanceArgv, testScriptAt(ref), testScriptAt(treeBefore));
+  if (neutered) return { pass: false, detail: { testOutput: `test passed but ${neutered} — refusing` } };
   // Return the frozen tree OID so the caller ships THIS exact verified tree via hook-free plumbing
   // (commit-tree), not a fresh checkout/commit that a planted post-checkout hook could mutate (round 13).
   return { pass: true, detail: { testOutput: 'acceptance passed (exit 0)' }, tree: treeBefore, hadIgnoredState };
@@ -380,6 +390,39 @@ export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
     if (net > 0) aggNeg += net;
   }
   if (aggNeg >= 150) return `net deletion of ${aggNeg} lines across files`;
+  return null;
+}
+
+// A shell test command that does no real work and exits 0 — the "neuter the test to pass" signature.
+// Every chain segment must be trivial for the whole to be a no-op; a real runner, a script, or a
+// failing `exit` makes it non-trivial. Conservative on purpose: a genuine test command always names a
+// runner/script, none of which match these, so a legit test-infra change is never flagged.
+export function isNoOpCommand(cmd) {
+  const c = String(cmd == null ? '' : cmd).trim();
+  if (!c) return true;
+  const segs = c.split(/&&|\|\||;/).map(s => s.trim()).filter(Boolean);
+  if (!segs.length) return true;
+  return segs.every(s =>
+    /^(:|true|exit\s+0)$/i.test(s) ||
+    /^echo(\s|$)/i.test(s) ||
+    /^node\s+(-e|--eval)\s+['"]?[^'"]*process\.exit\(0\)/i.test(s));
+}
+
+const PM_TEST = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
+// Defense-in-depth for the #1 attack (make the test pass by defeating the test): when the acceptance
+// is `<pm> test`, its behaviour lives in the editable package.json `scripts.test`. Refuse a candidate
+// that rewrote a REAL test script into a no-op. A legit migration swaps one real runner for another
+// (never a no-op), so this never blocks test-infra work. The soft writer-side guardrail is the primary
+// defense; this is the hard verify-time backstop the destructive-diff guard can't provide, because a
+// package.json script rewrite is not a TESTISH file deletion (round 31 live park run). Returns a reason
+// or null. baseScript/candidateScript are the `scripts.test` string at the base and the frozen tree.
+export function acceptanceNeutered(acceptanceArgv, baseScript, candidateScript) {
+  if (!Array.isArray(acceptanceArgv) || !PM_TEST.has(acceptanceArgv[0]) || !acceptanceArgv.includes('test')) return null;
+  if (baseScript == null || candidateScript == null) return null;      // no package.json / no test script on a side
+  if (String(baseScript) === String(candidateScript)) return null;     // unchanged
+  if (isNoOpCommand(baseScript)) return null;                          // base wasn't a real gate to begin with
+  if (isNoOpCommand(candidateScript)) return `the acceptance test command (${acceptanceArgv.join(' ')}) was neutered to a no-op — scripts.test rewritten to ${JSON.stringify(String(candidateScript).slice(0, 60))}`;
   return null;
 }
 
