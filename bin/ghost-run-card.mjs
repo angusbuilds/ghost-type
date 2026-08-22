@@ -78,3 +78,6 @@ if (result.mergeReady) {
   catch (e) { console.error('⚠', e.message); result.mergeReady = false; result.outcome = 'parked'; result.whyLine = `verified but could not fetch the branch back: ${String(e.message).split('\n')[0]}`; }
 }
 console.log('\n' + renderReport({ date: new Date().toISOString().slice(0, 10), cards: [result], tokens: result.tokensUsed || 0, costUsd: result.costUsd || 0 }));
+// Reflect the outcome in the exit code so a script/CI invoking this runner can tell shipped from
+// parked/errored — it always exited 0 before (round 29).
+process.exitCode = result.mergeReady ? 0 : 1;
