@@ -2,7 +2,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { parseCodexStream, runCodex, runAgent } from '../src/engine.mjs';
+import { parseCodexStream, runCodex, runAgent, codexArgs } from '../src/engine.mjs';
+
+test('codexArgs uses danger-full-access under the OS sandbox to avoid a nested-sandbox conflict (round 13)', () => {
+  // no OS sandbox → codex uses its own workspace-write confinement
+  const plain = codexArgs({ cwd: '/c', prompt: 'p' });
+  assert.equal(plain[plain.indexOf('--sandbox') + 1], 'workspace-write');
+  // OS write-confine active (sandboxClone) → codex must NOT double-sandbox (it would silently fail to write)
+  const sboxed = codexArgs({ cwd: '/c', prompt: 'p', sandboxClone: '/c' });
+  assert.equal(sboxed[sboxed.indexOf('--sandbox') + 1], 'danger-full-access');
+});
 
 const FAKE = path.resolve('test/fake-codex.mjs');
 
