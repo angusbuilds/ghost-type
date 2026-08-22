@@ -11,8 +11,19 @@ const SECRET_PATTERNS = [
   /gh[pousr]_[A-Za-z0-9]{20,}/g,               // all classic GitHub token prefixes: ghp/gho/ghu/ghs/ghr (round 6 #9)
   /github_pat_[A-Za-z0-9_]{22,}/g,             // fine-grained GitHub PAT
   /AKIA[0-9A-Z]{16}/g,
+  // AWS SECRET access key: undetectable on its own (looks like base64), so scope to its assignment
+  // context to avoid mangling ordinary base64/hashes (round 31 fuzz — AKIA caught only the ID half).
+  /aws_secret_access_key\s*[=:]\s*["']?[A-Za-z0-9/+]{20,}/gi,
   /xox[baprs]-[A-Za-z0-9-]{10,}/g,
+  /xapp-[0-9]-[A-Za-z0-9-]{10,}/g,             // Slack app-level token
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT
+  // Modern formats a coding agent routinely encounters — distinctive prefixes, ~zero false
+  // positives (round 31 fuzz found all of these leaking through the older list):
+  /npm_[A-Za-z0-9]{36}/g,                      // npm automation token (the agent runs `npm install`)
+  /AIza[0-9A-Za-z_-]{35}/g,                    // Google API key
+  /GOCSPX-[A-Za-z0-9_-]{20,}/g,                // Google OAuth client secret
+  /glpat-[A-Za-z0-9_-]{20,}/g,                 // GitLab personal access token
+  /dop_v1_[a-f0-9]{64}/g,                      // DigitalOcean personal access token
 ];
 
 export function scrubSecrets(text) {
