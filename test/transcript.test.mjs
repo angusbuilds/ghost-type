@@ -5,6 +5,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { extractUserPrompts, cleanPromptText, parseTranscriptFile } from '../src/transcript.mjs';
 
+test('extractUserPrompts excludes non-human rows: sidechain, Ghost-own clone sessions, writer/notification content (round 28 #9)', () => {
+  const rows = [
+    { type: 'user', message: { role: 'user', content: 'fix the failing parser test' }, cwd: '/Users/x/dev/app' },       // real human prompt — KEEP
+    { type: 'user', isSidechain: true, message: { role: 'user', content: 'audit this module for races' }, cwd: '/x' }, // a subagent prompt — DROP
+    { type: 'user', message: { role: 'user', content: 'write FEATURE.txt now' }, cwd: '/Users/x/.ghosttype/work/ghost_a' }, // Ghost's own clone session — DROP
+    { type: 'user', message: { role: 'user', content: 'WRITE EXACTLY IN THIS VOICE:\nterse' }, cwd: '/x' },            // Ghost's own writer prompt — DROP
+    { type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation. The summary...' }, cwd: '/x' }, // continuation summary — DROP
+  ].map(r => JSON.stringify(r)).join('\n');
+  const got = extractUserPrompts(rows).map(p => p.text);
+  assert.deepEqual(got, ['fix the failing parser test']);   // only the real human prompt survives
+});
+
 const FIX = path.resolve('test/fixtures/transcript-sample.jsonl');
 
 test('extracts only genuinely-typed prompts, dropping command/tool/meta noise', () => {

@@ -20,7 +20,12 @@ const STRIP_BLOCKS = [
 // study): perfectly-punctuated, capitalized, and nothing like his real voice.
 const EVAL_PROBE = /reply with (exactly|only)|respond with only|CLAUDE_OK|how many (r'?s|letters)|^name a (country|word|number)|strawberry/i;
 
-// Return the real typed text, or null if this content is command/tool/meta/eval noise.
+// Ghost Type's OWN generated text that lands in the transcript as a "user" row — its writer/driver
+// prompts, a compaction continuation-summary, or an injected task/system notification. None of it is
+// the owner typing, so it must not pollute the learned voice (round 28 #9).
+const GHOST_OWN = /WRITE EXACTLY IN THIS VOICE|ALREADY TRIED \(do not repeat|DIAGNOSIS OF LAST FAILURE|This session is being continued from a previous conversation|\[SYSTEM NOTIFICATION|automated background-task event|Caveat: The messages below were generated/i;
+
+// Return the real typed text, or null if this content is command/tool/meta/eval/Ghost-own noise.
 export function cleanPromptText(s) {
   if (typeof s !== 'string') return null;
   let t = s;
@@ -31,6 +36,7 @@ export function cleanPromptText(s) {
   if (t.startsWith('<')) return null;   // leftover wrapper we don't recognize → noise
   if (t.length < 2) return null;
   if (EVAL_PROBE.test(t)) return null;  // synthetic eval probe, not his voice
+  if (GHOST_OWN.test(t)) return null;   // Ghost Type's own prompt / a continuation summary / a notification (round 28 #9)
   return t;
 }
 
@@ -42,7 +48,10 @@ export function extractUserPrompts(jsonlText) {
     if (!s) continue;
     let j;
     try { j = JSON.parse(s); } catch { continue; }
-    if (j.type !== 'user' || j.isMeta) continue;
+    if (j.type !== 'user' || j.isMeta || j.isSidechain) continue;   // isSidechain = a subagent's prompt, not the human (round 28 #9)
+    // Ghost Type's OWN driving sessions run in clones under ~/.ghosttype — their "user" rows are the
+    // prompts IT generated, not the owner typing; skip them so the voice corpus stays human (round 28 #9).
+    if (String(j.cwd || '').includes('.ghosttype')) continue;
     const m = j.message;
     if (!m || m.role !== 'user' || typeof m.content !== 'string') continue; // list content = tool result
     const clean = cleanPromptText(m.content);
