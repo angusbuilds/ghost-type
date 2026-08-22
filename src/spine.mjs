@@ -171,6 +171,23 @@ function park(card, why, iterations, testOutput, promptsWritten, patterns, false
   return { project: card.project, goal: card.goal, outcome: 'parked', mergeReady: false, whyLine: why, iterations, branch: card.branch, testOutput, promptsWritten, falseDoneCount, ledger: ledger.rows };
 }
 
+// One card's failure — a clone or commit error, an unborn HEAD (rev-parse throws), any unexpected
+// throw out of runCard — must PARK that card and let the night keep going; without this boundary
+// one bad card aborts every later card (round 18 #10). Governor trips do NOT reach here (runCard
+// returns them as park results), and the caller's between-card governor checks still stop the night
+// on a real budget/deadline trip. The parked-shaped result counts correctly in the morning report.
+export async function runCardSafely(card, deps) {
+  try {
+    return await runCard(card, deps);
+  } catch (e) {
+    const why = String(e?.message || e).split('\n')[0];
+    log({ evt: 'card-errored', project: card.project, why });
+    return { project: card.project, goal: card.goal, outcome: 'parked', mergeReady: false,
+             whyLine: `card errored and was parked: ${why}`, iterations: 0, branch: card.branch,
+             testOutput: byteCap(String(e?.stack || e?.message || e), 2000), promptsWritten: [], falseDoneCount: 0, ledger: [] };
+  }
+}
+
 export async function runNight(cards, deps) {
   const results = [];
   const gov = deps.governor;
@@ -182,8 +199,9 @@ export async function runNight(cards, deps) {
       if (!c.ok) { tripReason = c.trip; break; }
     }
     // runCard meters every engine call into the governor itself (Codex H5) — don't
-    // double-count here; just re-check the caps between cards.
-    const r = await runCard(card, { ...deps, governor: gov });
+    // double-count here; just re-check the caps between cards. runCardSafely parks (not aborts)
+    // on a per-card throw so one bad card can't end the night (round 18 #10).
+    const r = await runCardSafely(card, { ...deps, governor: gov });
     results.push(r);
     if (gov) {
       const c = gov.check(deps.now());

@@ -16,7 +16,7 @@ import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
-import { runCard } from '../src/spine.mjs';
+import { runCardSafely } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
@@ -215,7 +215,7 @@ async function main() {
           deps.governor = gov;                              // meters every engine call (H5)
           const lineageFile = path.join(REPORT_DIR, `lineage-${card.project}.jsonl`);
           deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
-          const r = await runCard(card, deps);
+          const r = await runCardSafely(card, deps);        // per-card boundary: a throw parks, never aborts the night (round 18 #10)
           if (r.mergeReady) {
             try { fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch, r.commitOid); }
             catch (e) { console.error('⚠', e.message); r.mergeReady = false; r.whyLine = 'post-verify tampering detected — not merge-ready'; }

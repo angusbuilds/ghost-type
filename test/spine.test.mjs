@@ -1,7 +1,7 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard } from '../src/spine.mjs';
+import { runCard, runCardSafely } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
 
 const card = {
@@ -25,6 +25,24 @@ function deps(overrides = {}) {
 
 test('a card that verifies on iteration 1 ships', async () => {
   const r = await runCard(card, deps());
+  assert.equal(r.outcome, 'shipped');
+  assert.equal(r.mergeReady, true);
+  assert.equal(r.iterations, 1);
+});
+
+test('runCardSafely PARKS a card whose runCard throws (clone/commit/unborn-HEAD) rather than aborting the night (round 18 #10)', async () => {
+  const r = await runCardSafely(card, deps({ makeClone: () => { throw new Error('fatal: clone failed — disk full\n(second line ignored)'); } }));
+  assert.equal(r.outcome, 'parked');                 // counts in the report's parked tally, doesn't vanish
+  assert.equal(r.mergeReady, false);
+  assert.match(r.whyLine, /errored and was parked/);
+  assert.match(r.whyLine, /disk full/);
+  assert.doesNotMatch(r.whyLine, /second line/);     // whyLine is the first line only
+  assert.equal(r.branch, card.branch);               // still identifiable in the morning report
+  assert.deepEqual(r.promptsWritten, []);
+});
+
+test('runCardSafely passes a NON-throwing runCard result through unchanged (round 18 #10)', async () => {
+  const r = await runCardSafely(card, deps());       // ships normally — wrapper is transparent on success
   assert.equal(r.outcome, 'shipped');
   assert.equal(r.mergeReady, true);
   assert.equal(r.iterations, 1);
