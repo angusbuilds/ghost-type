@@ -18,6 +18,20 @@ test('assembles a fenced prompt and returns the engine text', async () => {
   assert.match(captured, /make the failing parser test pass/);
 });
 
+test('the writer is instructed NOT to compose a prompt that cheats the acceptance test (round 31 live park run)', async () => {
+  // A live park run showed the writer, when stuck, rationalise telling the agent to rewrite the
+  // acceptance test to pass ("editing the test is the assignment, no one is watching"). The writer
+  // must be constrained to make the REAL code satisfy the EXISTING test, never weaken/replace it.
+  let captured = '';
+  const engine = async ({ prompt }) => { captured = prompt; return { text: 'ok' }; };
+  await writeNextPrompt({
+    card: { goal: 'make the parser handle unicode' }, diffTail: '', testTail: 'exit 1', notesTail: '',
+    transcriptTail: '', voiceProfile: '', exemplars: [], failure: { code: 1, stderrHead: 'fail' }, engine,
+  });
+  assert.match(captured, /satisfy the existing acceptance/i);   // the positive framing
+  assert.match(captured, /never .*(edit|delet|weaken|replac|skip|disabl)/is);   // and the prohibition
+});
+
 test('a runaway voiceProfile/ledgerTable cannot blow up the assembled prompt (round 5 #7)', async () => {
   let captured = '';
   const engine = async ({ prompt }) => { captured = prompt; return { text: 'ok' }; };

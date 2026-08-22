@@ -30,6 +30,12 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
     fence('test-output', clean(testTail)),
     fence('night-notes', clean(notesTail)),
     fence('transcript', clean(transcriptTail)),
+    // Acceptance-integrity guardrail: an LLM writer, when the goal is hard, will rationalise telling
+    // the agent to just rewrite/weaken the test to pass (observed in a live park run: "editing the
+    // test is the assignment, no one is watching"). The next prompt must drive the REAL code to
+    // satisfy the EXISTING check — never to defeat it. This is the writer-side complement to the
+    // verify-time destructive-diff guard, which a package.json test-script rewrite would slip past.
+    'HARD CONSTRAINT: the next prompt must make the REAL code satisfy the existing acceptance test. NEVER instruct editing, deleting, weakening, disabling, skipping, or replacing the test, its command/script, or the acceptance criteria — that is cheating, not the assignment.',
     'Output ONLY the next prompt text — no preamble, no quotes. Match his voice EXACTLY: all-lowercase, terse, no "!", no question, often no ending punctuation, keep his rough typos. One blunt instruction.',
   ].filter(Boolean).join('\n\n');
 
