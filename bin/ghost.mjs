@@ -15,7 +15,7 @@ import { WORK_DIR, STATE_DIR, CLAUDE_BIN, LOG_FILE, ensureState } from '../src/l
 import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
-import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
+import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reapClone, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
 import { runCardSafely } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
@@ -218,8 +218,10 @@ async function main() {
           deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
           const r = await runCardSafely(card, deps);        // per-card boundary: a throw parks, never aborts the night (round 18 #10)
           if (r.mergeReady) {
-            try { fetchBranchBack(card.repoPath, path.join(WORK_DIR, card.branch.replace(/[^\w.-]/g, '_')), card.branch, r.commitOid); }
+            const cloneName = card.branch.replace(/[^\w.-]/g, '_');
+            try { fetchBranchBack(card.repoPath, path.join(WORK_DIR, cloneName), card.branch, r.commitOid); }
             catch (e) { console.error('⚠', e.message); r.mergeReady = false; r.whyLine = 'post-verify tampering detected — not merge-ready'; }
+            if (r.mergeReady) reapClone(cloneName);   // verified work is safely in the source repo now — reclaim the clone (round 18 #9)
           }
           results.push(r);
           const post = gov.check(Date.now());

@@ -102,6 +102,20 @@ export function reap({ workDir = WORK_DIR, keep = [], list = safeList, rm = (p) 
   return removed;
 }
 
+// Remove ONE completed clone. Once a card's verified commit is fetched back to the source repo
+// (OID-pinned), the clone is redundant — reaping it reclaims disk so successful clones don't
+// accumulate every night until the arm check blocks future runs (round 18 #9). reconcile/reap
+// still PRESERVE parked/crashed clones (unfinished work); only a confirmed-complete clone is reaped
+// here. Same symlink-ancestor + containment guards as reap; never throws.
+export function reapClone(name, { workDir = WORK_DIR, rm = (p) => fs.rmSync(p, { recursive: true, force: true }) } = {}) {
+  try { assertNoSymlinkAncestor(workDir); }
+  catch (e) { log({ evt: 'reap-clone-refused-symlink-ancestor', workDir, why: e.message }); return false; }
+  const root = path.resolve(workDir);
+  const target = path.resolve(root, name);
+  if (!target.startsWith(root + path.sep) || path.dirname(target) !== root) return false;   // only a direct child
+  try { rm(target); log({ evt: 'reap-clone', name }); return true; } catch { return false; }
+}
+
 export function arm({ sendoff, project, checks = armChecks } = {}) {
   const c = checks();
   const state = readState();
