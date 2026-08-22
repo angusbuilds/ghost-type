@@ -97,3 +97,17 @@ profile, `diagnoseFailure` → `generateCandidates` → `voteBest` produced:
 All-lowercase, terse, imperative, `right now`, `show me` — the owner's fingerprint (wants to
 *see* it work, not be told). Reproduce with `src/prompt-writer.mjs` + `src/preflight.mjs` and a
 read-only `runEngine` writer over a sample `rawTrace`.
+
+## Site render verification (the explainer page)
+
+`site/index.html` was render-verified on 2026-08-21 with the headless-Chrome self-test
+(`~/skills/tools/verify.mjs`). The hero renders correctly — headline, gradient, both CTAs,
+the "11:00 PM" night clock. The tool reports two errors; **both are instrument artifacts,
+not page bugs**, and you can ignore them:
+
+- `NOT_READY: window.__ready never became true` — verify.mjs waits for the WebGL-skill
+  readiness convention. This is a plain HTML/CSS/video page that never sets `__ready`.
+- `REQFAIL: media/hero.mp4 net::ERR_ABORTED` — open-source Chromium lacks the proprietary
+  H.264 decoder, so it aborts the mp4. The file is valid H.264/AVC 1920×1080 and `ffmpeg
+  -i hero.mp4 -f null -` decodes it end-to-end with zero errors; it plays in real
+  Chrome/Safari. Confirm the codec with `ffprobe -show_entries stream=codec_name site/media/hero.mp4`.
