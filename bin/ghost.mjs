@@ -209,7 +209,10 @@ async function main() {
         // a second Ctrl-C hard-exits (recovered by reconcile on the next arm).
         let interrupted = false;
         process.on('SIGINT', () => {
-          if (interrupted) process.exit(130);
+          // A second Ctrl-C force-exits, but still run the critical cleanup first — otherwise the
+          // caffeinate process survives (machine never sleeps) and the armed state is left stale
+          // (round 31 night audit #2). reconcile recovers any half-done clone on the next arm.
+          if (interrupted) { try { if (hb) clearInterval(hb); stopCaffeinate(caff); if (armed) disarm(); } catch { /* best effort */ } process.exit(130); }
           interrupted = true; console.log('\n⏹ interrupt — finishing this card, then stopping (Ctrl-C again to force)…');
         });
         for (const card of (runnable ? cards.filter(isCodingCard) : [])) {
@@ -244,7 +247,7 @@ async function main() {
         }
         // Proposal cards can't be graded unattended (no runner), but instead of being dropped they have
         // the agent WRITE a plan (PLAN.md on the branch) the owner reviews in the morning (round 28 #13).
-        for (const c of cards.filter(c => !isCodingCard(c))) {
+        for (const c of (runnable ? cards.filter(c => !isCodingCard(c)) : [])) {   // arm-time failure stops proposals too, not just coding cards (round 31 night audit #1)
           const gc = gov.check(Date.now());   // check ONCE (was called twice), and record the trip so the report shows why (round 29)
           if (interrupted || !gc.ok) {
             if (!gc.ok && !tripReason) tripReason = gc.trip;
@@ -256,10 +259,16 @@ async function main() {
           deps.writePlan = (cp, content) => fs.writeFileSync(path.join(cp, 'PLAN.md'), content);
           const r = await runProposal(c, deps);
           if (r.outcome === 'proposed' && r.commitOid) {
-            try { fetchBranchBack(c.repoPath, path.join(WORK_DIR, c.branch.replace(/[^\w.-]/g, '_')), c.branch, r.commitOid); }
-            catch (e) { r.whyLine = `plan written but couldn't fetch the branch back: ${String(e.message).split('\n')[0]}`; }
+            const cn = c.branch.replace(/[^\w.-]/g, '_');
+            // Reap the proposal clone once its PLAN.md commit is safely fetched back — like coding cards
+            // (round 31 night audit #5). On a fetch failure, park (not left 'proposed') and PRESERVE the
+            // clone: the plan never reached the source, so it's the only copy (round 31 night audit #3).
+            try { fetchBranchBack(c.repoPath, path.join(WORK_DIR, cn), c.branch, r.commitOid); reapClone(cn); }
+            catch (e) { r.outcome = 'parked'; r.mergeReady = false; r.whyLine = `plan written but couldn't fetch the branch back: ${String(e.message).split('\n')[0]}`; }
           }
           results.push(r);
+          const post = gov.check(Date.now());   // a trip on the LAST proposal must still reach the report (round 31 night audit #4)
+          if (!post.ok && !tripReason) tripReason = post.trip;
         }
       } finally {
         if (hb) clearInterval(hb);
