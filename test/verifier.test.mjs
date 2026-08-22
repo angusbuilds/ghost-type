@@ -558,6 +558,25 @@ test('destructiveDiffReason closes the round-8 bypasses: binary + more Node test
   assert.equal(destructiveDiffReason('remove the old model asset', '-\t-\tassets/model.bin', 'D\tassets/model.bin'), null);
 });
 
+test('TESTISH catches a test-file deletion across EVERY supported ecosystem — no naming evasion (round 31 fuzz)', () => {
+  // "make the test pass by deleting the test" is the #1 attack; TESTISH is the guard. A fuzz over
+  // real runner naming conventions must find no deletion that slips through under a build/fix goal.
+  const paths = [
+    'src/parser.test.js', 'src/comp.test.tsx', 'src/foo.spec.ts',   // node/jest/vitest
+    'pkg/parser_test.go',                                            // go
+    'tests/test_parser.py', 'test_parser.py', 'conftest.py', 'tests.py',   // pytest
+    'src/__tests__/foo.js', 'a/b/c/__tests__/x.jsx',                // jest __tests__, deeply nested
+    'parser-test.js', 'test-parser.mjs', 'test.js',                 // node discovery forms
+    'src/Parser.TEST.js',                                           // case-insensitive
+  ];
+  for (const p of paths) {
+    const r = destructiveDiffReason('add a feature to the parser', `0\t30\t${p}`, `D\t${p}`);
+    assert.match(String(r), /deletes test file/, `TESTISH failed to catch deletion of ${p}`);
+  }
+  // and a rename that pulls a test out of discovery is still caught
+  assert.match(destructiveDiffReason('refactor', '1\t1\tx', 'R100\tsrc/parser.spec.ts\tsrc/parser.ts'), /out of test discovery/);
+});
+
 test('destructiveDiffReason closes the round-9 exemption bypasses', () => {
   // "fix the failing parser test" mentions "test" but has no deletion intent → deleting the test is refused
   assert.match(destructiveDiffReason('fix the failing parser test', '0\t40\tparser.test.js', 'D\tparser.test.js'), /deletes test file/);
