@@ -136,7 +136,7 @@ parent dir, gitlink; nested untracked repos; non-ignored empty dirs git can't st
   governor trip are reported `skipped`; a same-day rerun ships a sibling branch, not a lost non-ff.
 
 ### Proof
-- 297 offline unit tests (`node --test`), zero runtime dependencies.
+- 298 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main
