@@ -85,3 +85,15 @@ node -e 'import("./src/verifier.mjs").then(async ({runAcceptance})=>{
 
 Verified on 2026-08-21: a real `claude -p` session runs to `subtype:success` under the
 write-confinement profile (it can create files in the clone) and cannot write outside it.
+
+## Voice-writer validation (the core novelty)
+
+The whole point — writing the *next* prompt in the owner's voice — was validated live on
+2026-08-22 against real Claude. Fed a real failure trace and the owner's distilled voice
+profile, `diagnoseFailure` → `generateCandidates` → `voteBest` produced:
+
+> voted next prompt: `write FEATURE.txt right now, content is just "ok", then cat it and show me`
+
+All-lowercase, terse, imperative, `right now`, `show me` — the owner's fingerprint (wants to
+*see* it work, not be told). Reproduce with `src/prompt-writer.mjs` + `src/preflight.mjs` and a
+read-only `runEngine` writer over a sample `rawTrace`.
