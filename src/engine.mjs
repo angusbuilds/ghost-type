@@ -24,7 +24,10 @@ export function capped(maxBytes = MAX_STREAM_BYTES) {
     push: (d) => {
       const s = String(d);
       if (!headDone) { head += s; if (Buffer.byteLength(head) >= half) headDone = true; }
-      else { tail += s; if (tail.length > half) tail = tail.slice(-half); }   // keep the END (final event)
+      // keep the last `half` BYTES (not UTF-16 code units — multibyte output would overrun the cap;
+      // round 31 engine audit #3). A partial leading codepoint decodes to one harmless replacement char
+      // at the OLDEST end; the terminal usage/result event at the stream's end is always preserved.
+      else { tail += s; if (Buffer.byteLength(tail) > half) tail = Buffer.from(tail).subarray(-half).toString(); }
     },
     get: () => (headDone && tail) ? head + '\n' + tail : head,
   };
@@ -74,7 +77,12 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
     // stdin..." and blocks forever waiting for it (every call hung until the timeout). /dev/null
     // gives immediate EOF so the agent runs with just the prompt arg. Harmless for claude -p,
     // which reads its prompt from the flag, not stdin (round 11).
-    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let child;
+    try {
+      child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {   // spawn can throw SYNCHRONOUSLY on a bad bin/options — resolve a structured failure, never reject (round 31 engine audit #2)
+      return resolve({ exitCode: 1, result: null, costUsd: 0, usage: null, text: `spawn failed: ${e.message}`, raw: '' });
+    }
     const out = capped(), err = capped();
     let settled = false;
     const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
@@ -90,6 +98,7 @@ export function runEngine({ cwd, prompt, allowedTools, maxTurns, maxBudgetUsd, e
         text: `engine call exceeded ${Math.round(timeoutMs / 1000)}s — killed`, raw: out.get() });
     }, timeoutMs);
     child.on('close', (code) => {
+      killGroup(child);   // reap any surviving detached descendant on a normal exit too, not only on timeout (round 31 engine audit #1)
       const parsed = parseStreamJson(out.get());
       const exitCode = code == null ? 1 : code;   // signal → nonzero so the watcher sees a failure
       finish({
@@ -165,7 +174,12 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
     // stdin..." and blocks forever waiting for it (every call hung until the timeout). /dev/null
     // gives immediate EOF so the agent runs with just the prompt arg. Harmless for claude -p,
     // which reads its prompt from the flag, not stdin (round 11).
-    const child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let child;
+    try {
+      child = spawn(cmd, cmdArgs, { cwd, env: env || process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {   // spawn can throw SYNCHRONOUSLY on a bad bin/options — resolve a structured failure, never reject (round 31 engine audit #2)
+      return resolve({ exitCode: 1, result: null, costUsd: 0, usage: null, text: `spawn failed: ${e.message}`, raw: '' });
+    }
     const out = capped(), err = capped();
     let settled = false;
     const finish = (r) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
@@ -178,6 +192,7 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
       finish({ exitCode: 1, result: null, usage: null, text: `codex call exceeded ${Math.round(timeoutMs / 1000)}s — killed`, raw: out.get() });
     }, timeoutMs);
     child.on('close', (code) => {
+      killGroup(child);   // reap any surviving detached descendant on a normal exit too, not only on timeout (round 31 engine audit #1)
       const p = parseCodexStream(out.get());
       // On a turn.failed, prefer the ERROR message so the failure REASON (e.g. a usage-limit phrase)
       // reaches the watcher for rate-limit classification — even if the turn emitted some assistant

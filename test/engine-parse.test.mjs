@@ -1,7 +1,7 @@
 // test/engine-parse.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStreamJson, capped } from '../src/engine.mjs';
+import { parseStreamJson, capped, runEngine, runCodex } from '../src/engine.mjs';
 
 test('capped keeps a small stream whole', () => {
   const c = capped(1000);
@@ -39,4 +39,28 @@ test('tolerates a trailing blank line and a malformed line', () => {
   const p = parseStreamJson(NDJSON + '\n\nnot json\n');
   assert.ok(p.result);          // still found the good result
   assert.equal(p.events.length >= 3, true);
+});
+
+test('runEngine/runCodex resolve a structured failure when spawn throws synchronously — never reject (round 31 engine audit #2)', async () => {
+  // A non-string bin makes spawn() throw synchronously inside the Promise executor. The contract is
+  // to always resolve { exitCode, result } so engineFailed/classifyOutcome see a failure, never an
+  // unhandled rejection.
+  for (const fn of [runEngine, runCodex]) {
+    const r = await fn({ cwd: '/tmp', prompt: 'x', allowedTools: 'Read', maxBudgetUsd: 1, bin: 12345 });
+    assert.equal(r.exitCode, 1);
+    assert.equal(r.result, null);
+    assert.match(String(r.text), /spawn/i);
+  }
+});
+
+test('capped bounds the TAIL by bytes, not code units, and preserves the final event (round 31 engine audit #3)', () => {
+  const c = capped(1000);   // 500-byte head + 500-byte tail budget
+  c.push('H'.repeat(600));  // fill the head past 500 bytes
+  c.push('あ'.repeat(2000)); // 2000 multibyte chars = 6000 bytes; the OLD .length cap kept ~500 chars = ~1500 bytes
+  c.push('\n{"type":"result","usage":{"input_tokens":7}}');   // the terminal event at the very end
+  const out = c.get();
+  // the byte-bounded tail keeps ≤500 bytes; without the fix it kept 500 あ = 1500 bytes (total ~2100).
+  // (the head can overshoot by one push — pre-existing — so allow slack, but far below the unfixed size.)
+  assert.ok(Buffer.byteLength(out) <= 1200, `capture ${Buffer.byteLength(out)} bytes — the tail isn't byte-bounded`);
+  assert.match(out, /"input_tokens":7/);   // the final usage event survived the byte-trim
 });
