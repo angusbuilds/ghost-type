@@ -22,13 +22,28 @@ export function buildSessionEnv(extraAllow = [], src = process.env, engine = 'cl
   return out;
 }
 
-// Build the --allowedTools value: reads/edits/writes, the exact test runner as a
-// Bash command, and git plumbing that can never push. No gh/curl/deploy.
+// Dependency-install commands per package manager. A fresh `git clone` omits gitignored dependency
+// dirs (node_modules/.venv), so WITHOUT allowing install the agent can't bootstrap them and the
+// acceptance test can never pass on any deps-needing repo (round 28 #12b — the test runner alone was
+// insufficient). Scoped to install/sync verbs — never publish/deploy/exec-arbitrary.
+const INSTALL_CMDS = {
+  npm: ['Bash(npm install)', 'Bash(npm install *)', 'Bash(npm ci)'],
+  pnpm: ['Bash(pnpm install)', 'Bash(pnpm install *)', 'Bash(pnpm i)'],
+  yarn: ['Bash(yarn install)', 'Bash(yarn)'],
+  bun: ['Bash(bun install)'],
+  pytest: ['Bash(pip install *)', 'Bash(python -m pip install *)', 'Bash(uv sync)', 'Bash(uv pip install *)'],
+  // cargo/go/make fetch their own deps during the test run — no separate install command needed.
+};
+
+// Build the --allowedTools value: reads/edits/writes, the exact test runner as a Bash command, the
+// package manager's INSTALL command (so the clone's missing deps can be bootstrapped), and git
+// plumbing that can never push. No gh/curl/deploy/publish.
 export function allowedToolsFor(testRunnerArgv) {
   const runner = testRunnerArgv.join(' ');
   return [
     'Read', 'Edit', 'Write',
     `Bash(${runner})`,
+    ...(INSTALL_CMDS[testRunnerArgv[0]] || []),
     'Bash(git diff *)', 'Bash(git status *)', 'Bash(git add *)',
     'Bash(git commit *)', 'Bash(git checkout -b *)', 'Bash(git log *)',
   ].join(',');

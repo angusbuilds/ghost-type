@@ -50,3 +50,15 @@ test('allowedToolsFor includes the test runner and git, excludes push/gh', () =>
   assert.doesNotMatch(a, /push/);
   assert.doesNotMatch(a, /\bgh\b/);
 });
+
+test('allowedToolsFor lets the agent INSTALL deps for the detected manager (clone omits node_modules) (round 28 #12b)', () => {
+  assert.match(allowedToolsFor(['npm', 'test']), /Bash\(npm install\)/);
+  assert.match(allowedToolsFor(['pnpm', 'test']), /Bash\(pnpm install\)/);   // RPLY's manager
+  assert.match(allowedToolsFor(['bun', 'run', 'test']), /Bash\(bun install\)/);
+  assert.match(allowedToolsFor(['pytest', '-q']), /Bash\(pip install \*\)/);
+  // still no publish/deploy/push escape hatch
+  const p = allowedToolsFor(['pnpm', 'test']);
+  assert.doesNotMatch(p, /publish|deploy|push/);
+  // cargo/go don't get an npm-style install (they fetch during test)
+  assert.doesNotMatch(allowedToolsFor(['cargo', 'test']), /install/);
+});
