@@ -38,6 +38,7 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
   const cards = [];
   const paused = [];
   for (const d of dossiers) {
+    if (cards.length >= maxCards) break;   // honor maxCards BEFORE planning — the old post-push check emitted one card even at maxCards=0 (round 29)
     if ((unmergedByProject[d.name] || 0) >= backpressureThreshold) { paused.push(d.name); continue; }
     const goal = (sendoff && sendoff.trim()) || `continue the current work on ${d.name}`;
     // Avoid an already-existing branch so a same-day rerun ships a sibling instead of being non-ff-rejected (#11).
@@ -64,7 +65,6 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
         situation: 'kickoff',
       });
     }
-    if (cards.length >= maxCards) break;
   }
   return { cards, paused };
 }

@@ -40,6 +40,12 @@ test('review backpressure pauses a project over the threshold', () => {
   assert.deepEqual(paused, ['sitecraft']);
 });
 
+test('maxCards is honored exactly — 0 plans nothing, N caps at N (round 29 off-by-one)', () => {
+  const many = Array.from({ length: 5 }, (_, i) => ({ name: `p${i}`, repoPath: `/d/p${i}`, testRunner: ['npm', 'test'] }));
+  assert.equal(planCards({ sendoff: 'go', dossiers: many, dateStr: '2026-08-21', maxCards: 0 }).cards.length, 0);   // was 1
+  assert.equal(planCards({ sendoff: 'go', dossiers: many, dateStr: '2026-08-21', maxCards: 3 }).cards.length, 3);
+});
+
 test('maxCards caps the queue', () => {
   const many = Array.from({ length: 5 }, (_, i) => ({ name: `p${i}`, repoPath: `/d/p${i}`, testRunner: ['npm', 'test'] }));
   const { cards } = planCards({ sendoff: 'go', dossiers: many, dateStr: '2026-08-21', maxCards: 2 });
