@@ -5,6 +5,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { detectTestRunner, scanRepo, runnerAvailable } from '../src/dossier.mjs';
+import { execFileSync } from 'node:child_process';
+
+test('scanRepo marks an UNBORN repo (no commits) non-runnable with a clear reason (round 18 #8)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-unborn-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));  // a runner IS present...
+  const dossier = scanRepo(d, { hasExe: () => true });   // ...and its executable resolves (real git → real unborn HEAD)
+  assert.equal(dossier.unborn, true);
+  assert.equal(dossier.canRunUnattended, false);         // ...but no commits → not runnable, so it never becomes a card
+  assert.match(dossier.unrunnableReason, /no commits/i);
+  fs.rmSync(d, { recursive: true, force: true });
+});
 
 function tmp(files) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-dos-'));

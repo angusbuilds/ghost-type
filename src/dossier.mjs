@@ -41,15 +41,20 @@ export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}
   const name = path.basename(repoPath.replace(/\/$/, ''));
   const testRunner = detectTestRunner(repoPath);
   const runnerReady = testRunner ? runnerAvailable(testRunner, { hasExe }) : false;
-  let branch = '', lastCommit = '', dirty = false;
+  let branch = '', lastCommit = '', dirty = false, hasHead = false;
   try { branch = gitRunner(repoPath, 'rev-parse', '--abbrev-ref', 'HEAD').trim(); } catch { /* not a repo */ }
   try { lastCommit = gitRunner(repoPath, 'log', '-1', '--format=%h %s').trim(); } catch { /* empty */ }
   try { dirty = gitRunner(repoPath, 'status', '--porcelain').trim().length > 0; } catch { /* ignore */ }
+  // An UNBORN repo (git init, no commits) has no HEAD — a clone of it is empty and headRef's
+  // `rev-parse HEAD` throws mid-run. There's nothing to work on, so it must not become a card;
+  // mark it non-runnable with a clear reason instead of letting a card park on a cryptic error (round 18 #8).
+  try { gitRunner(repoPath, 'rev-parse', '--verify', 'HEAD'); hasHead = true; } catch { /* unborn — no commits yet */ }
   return {
     name, repoPath, testRunner, runnerReady,
-    // Runnable unattended only if a runner is detected AND its executable resolves.
-    canRunUnattended: Boolean(testRunner) && runnerReady,
-    branch, lastCommit, dirty,
+    // Runnable unattended only if a runner is detected, its executable resolves, AND the repo has commits.
+    canRunUnattended: Boolean(testRunner) && runnerReady && hasHead,
+    unrunnableReason: !hasHead ? 'repository has no commits yet — nothing to clone or work on' : undefined,
+    branch, lastCommit, dirty, unborn: !hasHead,
     hasResume: fs.existsSync(path.join(repoPath, 'RESUME.md')),
     hasTodo: fs.existsSync(path.join(repoPath, 'TODO.md')) || fs.existsSync(path.join(repoPath, 'TODO')),
     isGit: fs.existsSync(path.join(repoPath, '.git')),

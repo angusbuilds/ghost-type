@@ -13,7 +13,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { WORK_DIR, STATE_DIR, CLAUDE_BIN, LOG_FILE, ensureState } from '../src/lib.mjs';
 import { scanDevRoot } from '../src/dossier.mjs';
-import { planCards, isCodingCard, countUnmergedGhostBranches } from '../src/planner.mjs';
+import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
 import { runCardSafely } from '../src/spine.mjs';
@@ -163,8 +163,9 @@ async function main() {
       // Count only branches NOT yet merged into HEAD — a ghost/* branch he's already reviewed
       // and merged shouldn't keep consuming the backlog (round 5 M4).
       const unmergedByProject = {};
-      for (const d of dossiers) unmergedByProject[d.name] = countUnmergedGhostBranches(d.repoPath, git);
-      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), unmergedByProject, maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });
+      const existingBranchesByProject = {};
+      for (const d of dossiers) { unmergedByProject[d.name] = countUnmergedGhostBranches(d.repoPath, git); existingBranchesByProject[d.name] = listGhostBranches(d.repoPath, git); }
+      const { cards, paused } = planCards({ sendoff: goal, dossiers, dateStr: dateStr(), unmergedByProject, existingBranchesByProject, maxCards: project ? 1 : CONFIG.maxCards, backpressureThreshold: CONFIG.backpressureThreshold, engine });
 
       console.log(`\n👻 planned queue (${cards.length}):`);
       for (const c of cards) console.log(`  - [${isCodingCard(c) ? 'code' : 'proposal'}] ${c.project}: ${c.goal}`);

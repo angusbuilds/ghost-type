@@ -1,7 +1,7 @@
 // test/planner.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planCards, isCodingCard, branchName, slugify, countUnmergedGhostBranches } from '../src/planner.mjs';
+import { planCards, isCodingCard, branchName, slugify, countUnmergedGhostBranches, disambiguateBranch, listGhostBranches } from '../src/planner.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -44,6 +44,45 @@ test('maxCards caps the queue', () => {
   const many = Array.from({ length: 5 }, (_, i) => ({ name: `p${i}`, repoPath: `/d/p${i}`, testRunner: ['npm', 'test'] }));
   const { cards } = planCards({ sendoff: 'go', dossiers: many, dateStr: '2026-08-21', maxCards: 2 });
   assert.equal(cards.length, 2);
+});
+
+test('planCards turns an unborn repo into a proposal with its SPECIFIC reason, not the generic runner message (round 18 #8)', () => {
+  const d = { name: 'fresh', repoPath: '/d/fresh', testRunner: ['npm', 'test'], canRunUnattended: false,
+              unrunnableReason: 'repository has no commits yet — nothing to clone or work on' };
+  const { cards } = planCards({ sendoff: 'go', dossiers: [d], dateStr: '2026-08-21' });
+  assert.equal(cards.length, 1);
+  assert.equal(isCodingCard(cards[0]), false);                       // a proposal, not a doomed coding card that parks
+  assert.match(cards[0].reason, /no commits/i);
+  assert.doesNotMatch(cards[0].reason, /not available on PATH/);     // NOT the misleading generic runner message
+});
+
+test('disambiguateBranch keeps the clean name, then allocates the next free -N (round 18 #11)', () => {
+  const base = 'ghost/2026-08-21-site-fix-bug';
+  assert.equal(disambiguateBranch(base, []), base);                       // no collision → clean name
+  assert.equal(disambiguateBranch(base, [base]), `${base}-2`);            // taken → -2
+  assert.equal(disambiguateBranch(base, [base, `${base}-2`]), `${base}-3`); // -2 taken too → -3
+  assert.equal(disambiguateBranch(base, [`${base}-2`]), base);           // base itself free → still base
+});
+
+test('planCards avoids an existing branch so a same-day rerun ships a sibling, not a lost non-ff push (round 18 #11)', () => {
+  const goal = 'make the gallery lazy-load';
+  const base = branchName('sitecraft', '2026-08-21', goal);
+  const { cards } = planCards({ sendoff: goal, dossiers: [dossiers[0]], dateStr: '2026-08-21',
+    existingBranchesByProject: { sitecraft: [base] } });                  // first run's branch already exists
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].branch, `${base}-2`);                             // second run gets a fresh sibling branch
+});
+
+test('listGhostBranches returns existing ghost/* branch names against a REAL repo (round 18 #11)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lgb-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a'), '1'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  g('branch', 'ghost/2026-08-21-x'); g('branch', 'ghost/2026-08-21-y'); g('branch', 'feature/z');
+  const got = listGhostBranches(d, (cwd, ...a) => execFileSync('git', a, { cwd }).toString());
+  assert.deepEqual(got.sort(), ['ghost/2026-08-21-x', 'ghost/2026-08-21-y']);   // ghost/* only, not feature/z
+  assert.deepEqual(listGhostBranches('/no/such/repo', (cwd, ...a) => execFileSync('git', a, { cwd }).toString()), []);
+  fs.rmSync(d, { recursive: true, force: true });
 });
 
 test('slugify + branchName produce clean branch names', () => {

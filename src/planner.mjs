@@ -12,15 +12,36 @@ export function branchName(project, dateStr, goal) {
   return `ghost/${dateStr}-${slugify(project)}-${slugify(goal)}`;
 }
 
+// The branch name is deterministic (date+project+goal), so re-running the SAME goal on the SAME day
+// would target a branch that already exists — and fetchBranchBack's non-forced fetch would reject
+// the second run as non-fast-forward, silently discarding a whole night's work (round 18 #11). Keep
+// the clean name in the common case; only when it already exists, allocate the next free -2/-3/... so
+// both runs land as reviewable sibling branches instead of one being lost.
+export function disambiguateBranch(base, taken = []) {
+  const seen = new Set(taken);
+  if (!seen.has(base)) return base;
+  for (let n = 2; ; n++) { const cand = `${base}-${n}`; if (!seen.has(cand)) return cand; }
+}
+
+// The ghost/* branch names that already exist as refs in a repo, so planning can avoid colliding with
+// them. `git` is injectable as (cwd, ...args) => stdout for tests. Returns [] on any error/empty repo.
+export function listGhostBranches(repoPath, git) {
+  try {
+    const out = git(repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/ghost/').trim();
+    return out ? out.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  } catch { return []; }
+}
+
 // unmergedByProject: { projectName: count } — projects over the backpressure threshold are
 // skipped so overnight supply can't outrun the owner's review capacity.
-export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, maxCards = 2, backpressureThreshold = 3, engine = 'claude' }) {
+export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, existingBranchesByProject = {}, maxCards = 2, backpressureThreshold = 3, engine = 'claude' }) {
   const cards = [];
   const paused = [];
   for (const d of dossiers) {
     if ((unmergedByProject[d.name] || 0) >= backpressureThreshold) { paused.push(d.name); continue; }
     const goal = (sendoff && sendoff.trim()) || `continue the current work on ${d.name}`;
-    const branch = branchName(d.name, dateStr, goal);
+    // Avoid an already-existing branch so a same-day rerun ships a sibling instead of being non-ff-rejected (#11).
+    const branch = disambiguateBranch(branchName(d.name, dateStr, goal), existingBranchesByProject[d.name] || []);
     // A repo is codeable only if it has a runner AND that runner is actually usable. When a
     // scan set canRunUnattended, honor it (it already folds in executable availability, round
     // 4 #11); hand-built dossiers without the flag fall back to runner-presence.
@@ -36,8 +57,10 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
       // iteration/token budget, and is reported as its own category.
       cards.push({
         project: d.name, repoPath: d.repoPath, goal, branch, kind: 'proposal',
-        reason: d.testRunner ? `test runner "${d.testRunner[0]}" not available on PATH — cannot verify unattended`
-                             : 'no test runner detected — cannot verify unattended',
+        // Prefer a specific dossier reason (e.g. an unborn repo) over the generic runner message (round 18 #8).
+        reason: d.unrunnableReason
+             || (d.testRunner ? `test runner "${d.testRunner[0]}" not available on PATH — cannot verify unattended`
+                              : 'no test runner detected — cannot verify unattended'),
         situation: 'kickoff',
       });
     }
