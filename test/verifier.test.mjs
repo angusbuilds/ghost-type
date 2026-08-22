@@ -68,6 +68,62 @@ test('sterileTree snapshots a file→directory refactor (tracked file replaced b
   fs.rmSync(d, { recursive: true, force: true });
 });
 
+test('sterileTree snapshots a file whose NAME contains a newline (NUL-delimited index-info, not \\n-joined) (round 18 #12)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-nl-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.txt'), 'base'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const name = 'weird\nname.txt';                                    // a legal POSIX filename with an embedded newline
+  fs.writeFileSync(path.join(d, name), 'newline-in-the-name');
+  let tree;
+  assert.doesNotThrow(() => { tree = sterileTree(d); });             // old \n-joined --index-info threw "malformed index info"
+  const ls = execFileSync('git', ['ls-tree', '-r', '-z', tree], { cwd: d }).toString();
+  assert.ok(ls.includes(name));                                      // the newline-named file is captured, not dropped/erroring
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
+// A gitlink whose submodule directory was replaced or removed must NOT ship the stale recorded commit.
+function mkSubmoduleRepo(prefix) {
+  const main = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const gm = (...a) => execFileSync('git', a, { cwd: main });
+  gm('init', '-q'); gm('config', 'user.email', 't@t'); gm('config', 'user.name', 't');
+  fs.writeFileSync(path.join(main, 'a.txt'), 'hi'); gm('add', '-A'); gm('commit', '-q', '-m', 'base');
+  const sub = path.join(main, 'sub'); fs.mkdirSync(sub);
+  const gs = (...a) => execFileSync('git', a, { cwd: sub });
+  gs('init', '-q'); gs('config', 'user.email', 't@t'); gs('config', 'user.name', 't');
+  fs.writeFileSync(path.join(sub, 'x'), '1'); gs('add', '-A'); gs('commit', '-q', '-m', 'sub');
+  execFileSync('git', ['-c', 'protocol.file.allow=always', 'add', 'sub'], { cwd: main });   // record the gitlink
+  return { main, sub };
+}
+
+test('sterileTree snapshots a gitlink REPLACED by a plain file, not the stale submodule commit (round 18 #3)', () => {
+  const { main, sub } = mkSubmoduleRepo('gt-g2f-');
+  fs.rmSync(sub, { recursive: true, force: true });
+  fs.writeFileSync(sub, 'now-a-plain-file');                          // type change: gitlink dir → regular file
+  const tree = sterileTree(main);
+  const ls = execFileSync('git', ['ls-tree', tree, 'sub'], { cwd: main }).toString();
+  assert.match(ls, /^100644 blob/);                                  // captured as the plain file...
+  assert.doesNotMatch(ls, /160000/);                                 // ...not the stale 160000 gitlink
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('sterileTree OMITS a gitlink whose submodule directory was deleted — a real deletion, not a preserved commit (round 18 #3)', () => {
+  const { main, sub } = mkSubmoduleRepo('gt-gdel-');
+  fs.rmSync(sub, { recursive: true, force: true });                  // deleted, nothing in its place
+  const tree = sterileTree(main);
+  const ls = execFileSync('git', ['ls-tree', tree, 'sub'], { cwd: main }).toString().trim();
+  assert.equal(ls, '');                                              // gone from the tree, not a stale 160000
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
+test('sterileTree refuses a dirty submodule even when status.showUntrackedFiles=no would hide it (round 18 #4)', () => {
+  const { main, sub } = mkSubmoduleRepo('gt-shide-');
+  execFileSync('git', ['config', 'status.showUntrackedFiles', 'no'], { cwd: sub });   // blind default status...
+  fs.writeFileSync(path.join(sub, 'sneaky.js'), 'untracked bytes the test can see');  // ...then dirty it, untracked-only
+  assert.throws(() => sterileTree(main), /uncommitted changes/i);    // --untracked-files=all forces it visible → refuse
+  fs.rmSync(main, { recursive: true, force: true });
+});
+
 test('sterileTree does NOT hang on an untracked FIFO — git omits it from ls-files (round 16)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-fifo-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });

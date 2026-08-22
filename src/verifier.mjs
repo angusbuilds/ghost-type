@@ -44,15 +44,22 @@ export function sterileTree(clonePath) {
     const [, mode, oid, f] = m;
     if (mode === '160000') {
       const sub = path.join(clonePath, f);
+      // The index records a gitlink, but the worktree may no longer hold a submodule there. lstat the
+      // path FIRST: a deletion or a type-change must not silently ship the stale recorded commit (round 18 #3).
+      let sst;
+      try { sst = fs.lstatSync(sub); } catch { continue; }    // path gone → a real deletion; omit the gitlink
+      if (!sst.isDirectory()) { addWorktree(f); continue; }   // replaced by a file/symlink → snapshot THAT, not the old commit
       if (fs.existsSync(path.join(sub, '.git'))) {
-        let head = '';
-        try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim(); } catch { /* uninitialized */ }
-        if (head && head !== oid) throw new Error(`submodule ${f} HEAD ${head} != recorded ${oid} — refusing (its bytes aren't in the frozen tree)`);
-        // A matching HEAD is NOT enough: uncommitted edits in the submodule worktree (or non-ignored
-        // untracked files) drive the acceptance test yet can't be represented by the superproject
-        // gitlink, so shipping would silently drop them. Any dirtiness → refuse (round 17 a).
-        let dirty = '';
-        try { dirty = execFileSync('git', [...STERILE, 'status', '--porcelain'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim(); } catch { /* unreadable → leave clean, HEAD check already ran */ }
+        // Initialized submodule: HEAD must match the recorded commit AND its worktree must be clean, else
+        // its real bytes aren't in the frozen tree. Both git calls run FAIL-CLOSED — an anomalous failure
+        // refuses rather than silently shipping the old gitlink — and status is forced to see everything
+        // `status.showUntrackedFiles=no` or submodule-ignore config could otherwise hide (round 18 #4).
+        let head, dirty;
+        try {
+          head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+          dirty = execFileSync('git', [...STERILE, 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'], { cwd: sub, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+        } catch (e) { throw new Error(`submodule ${f}: cannot verify HEAD/cleanliness — refusing (${e.message.split('\n')[0]})`); }
+        if (head !== oid) throw new Error(`submodule ${f} HEAD ${head} != recorded ${oid} — refusing (its bytes aren't in the frozen tree)`);
         if (dirty) throw new Error(`submodule ${f} has uncommitted changes — refusing (its bytes aren't in the frozen tree)`);
       }
       indexLines.push(`160000 ${oid}\t${f}`);
@@ -65,11 +72,13 @@ export function sterileTree(clonePath) {
     const oids = run(batch.map(b => path.join(clonePath, b.f)).join('\n') + '\n', 'hash-object', '-w', '--no-filters', '--stdin-paths').trim().split('\n');
     batch.forEach((b, i) => indexLines.push(`${b.mode} ${oids[i]}\t${b.f}`));
   }
-  // Build the throwaway index in ONE update-index --index-info, then write the tree.
+  // Build the throwaway index in ONE update-index, then write the tree. NUL-delimited (`-z`) so a
+  // filename that itself contains a newline can't split a record — the `\n`-joined form threw
+  // "malformed index info" on such a path (round 18 #12).
   const idx = path.join(clonePath, '.git', `ghost-idx-${crypto.randomBytes(6).toString('hex')}`);
   const withIdx = (input, ...args) => execFileSync('git', [...STERILE, ...args], { cwd: clonePath, env: { ...process.env, GIT_INDEX_FILE: idx }, input, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
   try {
-    if (indexLines.length) withIdx(indexLines.join('\n') + '\n', 'update-index', '--index-info');
+    if (indexLines.length) withIdx(indexLines.join('\0') + '\0', 'update-index', '-z', '--index-info');
     return withIdx(undefined, 'write-tree').trim();
   } finally { try { fs.unlinkSync(idx); } catch { /* best effort */ } }
 }
