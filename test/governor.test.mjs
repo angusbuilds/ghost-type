@@ -5,6 +5,12 @@ import { Governor, usageTokens } from '../src/governor.mjs';
 
 const NOW = Date.parse('2026-08-21T22:00:00Z');
 
+test('a null nightDeadlineMs means NO deadline — check() does not trip immediately (round 29)', () => {
+  const g = new Governor({ maxTokensNight: 1e9, nightDeadlineMs: null, maxConsecErrors: 5 });
+  assert.deepEqual(g.check(NOW), { ok: true, trip: null });   // was: `NOW >= null` → tripped night-deadline
+  assert.equal(g.remainingMs(NOW), Infinity);                 // consistent with remainingMs
+});
+
 test('usageTokens sums ALL four buckets incl. cache, so the token cap counts a cached call correctly (round 28 #7)', () => {
   const usage = { input_tokens: 33, cache_creation_input_tokens: 53995, cache_read_input_tokens: 230827, output_tokens: 904 };
   assert.equal(usageTokens(usage), 285759);              // not 937 (input+output only) — a ~300x undercount before

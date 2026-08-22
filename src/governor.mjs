@@ -30,7 +30,9 @@ export class Governor {
   check(nowMs) {
     if (this.tokens >= this.maxTokensNight) return { ok: false, trip: 'token-budget' };
     if (this.costUsd >= this.maxCostUsd) return { ok: false, trip: 'cost-budget' };
-    if (nowMs >= this.nightDeadlineMs) return { ok: false, trip: 'night-deadline' };
+    // Guard null: a null deadline means "no deadline" (as remainingMs already treats it) — without the
+    // guard, `nowMs >= null` coerces to `nowMs >= 0` and trips night-deadline immediately (round 29).
+    if (this.nightDeadlineMs != null && nowMs >= this.nightDeadlineMs) return { ok: false, trip: 'night-deadline' };
     if (this.consecErrors >= this.maxConsecErrors) return { ok: false, trip: 'consecutive-errors' };
     return { ok: true, trip: null };
   }
