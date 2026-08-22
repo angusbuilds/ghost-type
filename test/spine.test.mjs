@@ -59,6 +59,20 @@ test('a card that verifies on iteration 1 ships', async () => {
   assert.equal(r.iterations, 1);
 });
 
+test('ENGINE errors (network) STILL count against the breaker even though test failures do not (round 28 #6 guard)', async () => {
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 1e9, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 99 });
+  const r = await runCard(card, deps({
+    now: () => NOW,
+    runEngine: async () => ({ exitCode: 1, result: null, text: 'fetch failed: network unreachable' }),   // engine keeps failing
+    sleepUntil: async () => {},
+    governor: gov,
+  }));
+  assert.equal(r.outcome, 'parked');
+  assert.match(r.whyLine, /network/);
+  assert.ok(gov.consecErrors >= 4, 'engine transport errors still increment the breaker (noteError kept, noteOk not reached)');
+});
+
 test('a rate-limit whose reset is PAST the nightly deadline parks immediately, not sleeping for hours (round 28 #5)', async () => {
   const NOW = Date.parse('2026-08-21T22:00:00Z');
   const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 1e9, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 5 });   // 1h deadline
