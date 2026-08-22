@@ -3,6 +3,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { parseCodexStream, runCodex, runAgent, codexArgs } from '../src/engine.mjs';
+import { classifyOutcome } from '../src/watcher.mjs';
+
+test('a Codex turn.failed usage limit is a STRUCTURED error → classified rate-limited, not generic errored (round 28 #4)', async () => {
+  const FAKE0 = path.resolve('test/fake-codex.mjs');
+  const r = await runCodex({ cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'usage-limit' }, bin: FAKE0 });
+  assert.notEqual(r.result, null);                    // NOT null — a structured provider failure, not a transport crash
+  assert.equal(r.result.is_error, true);
+  assert.match(r.text, /usage limit/i);
+  // the whole point: the watcher now waits for the reset instead of retrying+parking as 'errored'
+  const outcome = classifyOutcome({ exitCode: r.exitCode, result: r.result, text: r.text, nowMs: 0 });
+  assert.equal(outcome.state, 'rate-limited');
+});
 
 test('codexArgs uses danger-full-access only for CODING calls under the OS sandbox (round 13)', () => {
   const mode = (a) => a[a.indexOf('--sandbox') + 1];

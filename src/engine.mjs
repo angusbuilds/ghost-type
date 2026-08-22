@@ -190,9 +190,15 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
       const rawExit = code == null ? 1 : code;
       const ok = rawExit === 0 && p.turnCompleted && !p.turnFailed;
       const exitCode = ok ? 0 : (rawExit === 0 ? 1 : rawExit);
+      // A `turn.failed` is a STRUCTURED provider failure (e.g. a usage limit), NOT a transport crash —
+      // give it a result so the watcher classifies it as rate-limited/network, not a generic 'errored'
+      // that just retries and parks. Reserve result:null for a real crash with no terminal event (round 28 #4).
+      const structuredFail = !ok && p.turnFailed;
       finish({
         exitCode,
-        result: ok ? { subtype: 'success', result: text || 'codex turn completed' } : null,
+        result: ok ? { subtype: 'success', result: text || 'codex turn completed' }
+              : structuredFail ? { subtype: 'error', is_error: true, result: text || p.errorMsg || 'codex turn failed' }
+              : null,
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
           output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,

@@ -8,11 +8,14 @@
 // "in 90 seconds", combined and abbreviated forms alike.
 const TRIGGER = /reset|try again|available again|limit reached|rate limit|quota/;
 const DURATION = /(\d+)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)\b/g;
+// Absolute clock form Claude/Codex also emit: "try again at 6:00 PM", "resets at 3pm", "at 11:30 am".
+const CLOCK = /\bat\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/;
 
 export function parseResetTime(text, nowMs) {
   const s = String(text).toLowerCase();
   if (!TRIGGER.test(s)) return null;
 
+  // 1. Relative durations: "resets in 2h 30m", "try again in 45 minutes".
   let totalMs = 0;
   let found = false;
   for (const m of s.matchAll(DURATION)) {
@@ -22,5 +25,22 @@ export function parseResetTime(text, nowMs) {
     totalMs += n * mult;
     found = true;
   }
-  return found && totalMs > 0 ? nowMs + totalMs : null;
+  if (found && totalMs > 0) return nowMs + totalMs;
+
+  // 2. Absolute clock time → the NEXT local occurrence of that time after now, so we wait until the
+  //    real reset rather than inventing an hour (round 28 #5). 12h forms use am/pm; a bare hour is 24h.
+  const c = s.match(CLOCK);
+  if (c) {
+    let hour = Number(c[1]);
+    const min = c[2] ? Number(c[2]) : 0;
+    if (hour <= 23 && min <= 59) {
+      if (c[3]) { const pm = c[3][0] === 'p'; hour = (hour % 12) + (pm ? 12 : 0); }
+      const d = new Date(nowMs);
+      d.setHours(hour, min, 0, 0);
+      let target = d.getTime();
+      if (target <= nowMs) target += 24 * 3_600_000;   // already past today → next day
+      return target;
+    }
+  }
+  return null;
 }

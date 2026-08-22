@@ -111,6 +111,11 @@ export async function runCard(card, deps) {
 
     if (outcome.state === 'rate-limited') {
       iterations -= 1;                       // not a real attempt — don't spend the budget
+      // If the reset lands after the nightly deadline, the night ends before work can resume — park
+      // now instead of sleeping for hours (an accurate far-future reset from round 28 #5 makes this real).
+      if (governor && governor.nightDeadlineMs != null && outcome.resetAtMs != null && outcome.resetAtMs >= governor.nightDeadlineMs) {
+        return { ...park(card, 'rate-limited past the nightly deadline', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
+      }
       if (++rateWaits > 6) return { ...park(card, 'rate-limited too many times', iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd };
       await sleepUntil(outcome.resetAtMs);
       continue;

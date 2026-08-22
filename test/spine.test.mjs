@@ -30,6 +30,21 @@ test('a card that verifies on iteration 1 ships', async () => {
   assert.equal(r.iterations, 1);
 });
 
+test('a rate-limit whose reset is PAST the nightly deadline parks immediately, not sleeping for hours (round 28 #5)', async () => {
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 1e9, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 5 });   // 1h deadline
+  let slept = false;
+  const r = await runCard(card, deps({
+    now: () => NOW,
+    runEngine: async () => ({ exitCode: 0, result: { subtype: 'error', result: 'usage limit reached, try again in 10h' }, usage: { input_tokens: 1, output_tokens: 1 }, text: '' }),
+    sleepUntil: async () => { slept = true; },
+    governor: gov,
+  }));
+  assert.equal(r.outcome, 'parked');
+  assert.match(r.whyLine, /past the nightly deadline/);
+  assert.equal(slept, false);                          // reset is 10h out but the night ends in 1h → don't wait
+});
+
 test('failing acceptance tests do NOT trip the consecutive-error breaker — the card uses its full iteration budget (round 28 #6)', async () => {
   const NOW = Date.parse('2026-08-21T22:00:00Z');
   const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 1e9, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 3 });

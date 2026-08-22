@@ -21,4 +21,8 @@ if (scenario === 'success') {
 } else if (scenario === 'crash') {
   process.stderr.write('codex: fatal error\n');
   process.exit(1);
+} else if (scenario === 'usage-limit') {
+  // a STRUCTURED provider failure — a usage limit — as turn.failed + nonzero exit (round 28 #4)
+  line({ type: 'turn.failed', error: { message: "You've hit your usage limit. Try again in 30 minutes." } });
+  process.exit(1);
 }
