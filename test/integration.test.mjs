@@ -44,7 +44,9 @@ test('runNight enforces the Governor token cap and stops cleanly mid-queue', asy
   const cards = [baseCard({ project: 'a', branch: 'ghost/a' }), baseCard({ project: 'b', branch: 'ghost/b' }), baseCard({ project: 'c', branch: 'ghost/c' })];
   const night = await runNight(cards, { ...baseDeps(), governor: gov });
   // each card spends 300 tokens; cap is 500, so after card 1 (300) it's fine, after card 2 (600) it trips
-  assert.equal(night.cards.length, 2);
+  assert.equal(night.cards.length, 3);                 // 2 ran; the 3rd is REPORTED as skipped, not dropped (round 28 #14)
+  assert.equal(night.cards[2].outcome, 'skipped');
+  assert.match(night.cards[2].whyLine, /not started/);
   assert.equal(night.tripReason, 'token-budget');
   assert.ok(night.tokens >= 500);
 });
@@ -53,6 +55,7 @@ test('runNight enforces the night deadline before the next card', async () => {
   const now = Date.parse('2026-08-21T22:00:00Z');
   const gov = new Governor({ maxTokensNight: 1e9, nightDeadlineMs: now - 1, maxConsecErrors: 5 });
   const night = await runNight([baseCard()], { ...baseDeps(), governor: gov });
-  assert.equal(night.cards.length, 0);      // deadline already passed → nothing runs
+  assert.equal(night.cards.length, 1);              // deadline already passed → nothing runs, but the card is reported skipped (round 28 #14)
+  assert.equal(night.cards[0].outcome, 'skipped');
   assert.equal(night.tripReason, 'night-deadline');
 });

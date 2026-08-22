@@ -1,4 +1,14 @@
 // src/governor.mjs
+
+// Total tokens for a usage object. Anthropic bills ALL FOUR buckets — input, output, and both cache
+// tiers (creation + read) — as usage; summing only input+output undercounted a cached call by up to
+// ~300x (e.g. 937 vs 285759), leaving the nightly token cap effectively unenforced (round 28 #7).
+export function usageTokens(usage) {
+  if (!usage) return 0;
+  return (usage.input_tokens || 0) + (usage.output_tokens || 0)
+       + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
+}
+
 export class Governor {
   constructor({ maxTokensNight, nightDeadlineMs, maxConsecErrors, maxCostUsd = Infinity }) {
     this.maxTokensNight = maxTokensNight;
@@ -9,10 +19,7 @@ export class Governor {
     this.costUsd = 0;
     this.consecErrors = 0;
   }
-  addUsage(usage) {
-    if (!usage) return;
-    this.tokens += (usage.input_tokens || 0) + (usage.output_tokens || 0);
-  }
+  addUsage(usage) { this.tokens += usageTokens(usage); }
   addCost(usd) { if (usd) this.costUsd += usd; }
   noteError() { this.consecErrors += 1; }
   noteOk() { this.consecErrors = 0; }

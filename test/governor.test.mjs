@@ -1,9 +1,19 @@
 // test/governor.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Governor } from '../src/governor.mjs';
+import { Governor, usageTokens } from '../src/governor.mjs';
 
 const NOW = Date.parse('2026-08-21T22:00:00Z');
+
+test('usageTokens sums ALL four buckets incl. cache, so the token cap counts a cached call correctly (round 28 #7)', () => {
+  const usage = { input_tokens: 33, cache_creation_input_tokens: 53995, cache_read_input_tokens: 230827, output_tokens: 904 };
+  assert.equal(usageTokens(usage), 285759);              // not 937 (input+output only) — a ~300x undercount before
+  assert.equal(usageTokens({ input_tokens: 10, output_tokens: 5 }), 15);   // no cache fields → just input+output
+  assert.equal(usageTokens(null), 0);
+  const g = new Governor({ maxTokensNight: 300000, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 5 });
+  g.addUsage(usage);
+  assert.equal(g.tokens, 285759);                        // the cap now meters the real usage
+});
 const caps = { maxTokensNight: 1000, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 3 };
 
 test('trips on token budget', () => {

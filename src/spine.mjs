@@ -4,6 +4,7 @@ import { shieldScan } from './sanitize.mjs';
 import { Ledger } from './ledger.mjs';
 import { log, byteCap } from './lib.mjs';
 import { DEFAULT_CALL_TIMEOUT_MS } from './engine.mjs';
+import { usageTokens } from './governor.mjs';
 
 const MIN_CALL_USD = 0.05;   // below this, don't bother making a call — park as cost-exhausted
 
@@ -42,7 +43,7 @@ export async function runCard(card, deps) {
 
   // Every engine call — main, diagnosis, candidates, vote — goes through here so the
   // governor sees all of them and the token counter is honest (Codex H5).
-  const meter = (r) => { if (r?.usage) { const t = (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); tokensUsed += t; if (costSink) costSink.tokensUsed += t; governor?.addUsage(r.usage); } const c = r?.costUsd ?? r?.result?.total_cost_usd; if (c) { costUsd += c; if (costSink) costSink.costUsd += c; governor?.addCost(c); } return r; };
+  const meter = (r) => { if (r?.usage) { const t = usageTokens(r.usage); tokensUsed += t; if (costSink) costSink.tokensUsed += t; governor?.addUsage(r.usage); } const c = r?.costUsd ?? r?.result?.total_cost_usd; if (c) { costUsd += c; if (costSink) costSink.costUsd += c; governor?.addCost(c); } return r; };
   const govCheck = () => { if (governor) { const c = governor.check(now()); if (!c.ok) { const e = new Error('GOVERNOR_TRIP'); e.trip = c.trip; throw e; } } };
   // Bind EVERY call — main and writer — to the governor's remaining headroom: budget capped to
   // remaining nightly dollars, timeout to min(45-min ceiling, time-to-deadline). Without this a
@@ -121,7 +122,8 @@ export async function runCard(card, deps) {
       await sleepUntil(now() + 30_000);
       continue;
     }
-    netBackoffs = 0;   // a real attempt happened — reset the transient-failure counter
+    netBackoffs = 0;               // a real attempt happened — reset the transient-failure counter
+    governor?.noteOk();            // a real engine RESPONSE resets the consecutive-ENGINE-error breaker (round 28 #6)
 
     // PATCH-APPLIED GUARD — before spending a test cycle, confirm the tree actually changed.
     if (!patchApplied(clonePath, baseRef)) {
@@ -158,7 +160,9 @@ export async function runCard(card, deps) {
       return { project: card.project, goal: card.goal, outcome: 'shipped', mergeReady: true, whyLine: 'acceptance passed', iterations, branch: card.branch, testOutput: lastTestOutput, promptsWritten, falseDoneCount, ledger: ledger.rows, tokensUsed, costUsd, commitOid, tree: v.tree, hadIgnoredState: v.hadIgnoredState };
     }
 
-    governor?.noteError();
+    // A FAILING acceptance test is a normal iteration, NOT an engine error — counting it against the
+    // consecutive-error breaker made a card's maxIterations unreachable (parked at maxConsecErrors=3
+    // regardless of a 6-iteration budget). The card iteration budget alone bounds test failures (round 28 #6).
     ledger.record({ iteration: iterations, prompt, outcome: 'fail', exitCode: 1, stderrHead: v.detail.testOutput, howClose: claim.claimedDone ? 'claimed done but tests failed' : 'tests failed' });
     if (iterations >= card.maxIterations) break;
     try { prompt = await composeNext({ engText: eng.text, testOutput: v.detail.testOutput }); promptsWritten.push(prompt); recordPrompt({ iteration: iterations, prompt, outcome: 'fail', project: card.project }); }
@@ -197,12 +201,14 @@ export async function runNight(cards, deps) {
   const results = [];
   const gov = deps.governor;
   let tripReason = null;
+  let started = 0;
   for (const card of cards) {
     // Enforce the nightly caps BEFORE spending on the next card, and stop cleanly on a trip.
     if (gov) {
       const c = gov.check(deps.now());
       if (!c.ok) { tripReason = c.trip; break; }
     }
+    started++;
     // runCard meters every engine call into the governor itself (Codex H5) — don't
     // double-count here; just re-check the caps between cards. runCardSafely parks (not aborts)
     // on a per-card throw so one bad card can't end the night (round 18 #10).
@@ -212,6 +218,13 @@ export async function runNight(cards, deps) {
       const c = gov.check(deps.now());
       if (!c.ok) { tripReason = c.trip; break; }
     }
+  }
+  // Cards never started because the queue stopped (governor trip) are reported as SKIPPED, not
+  // silently dropped from the morning report (round 28 #14).
+  for (const c of cards.slice(started)) {
+    results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false,
+      whyLine: `not started — ${tripReason || 'queue stopped'}`, iterations: 0, branch: c.branch,
+      testOutput: '', promptsWritten: [], falseDoneCount: 0, ledger: [], tokensUsed: 0, costUsd: 0 });
   }
   return {
     date: new Date(deps.now()).toISOString().slice(0, 10),

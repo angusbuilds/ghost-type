@@ -30,6 +30,20 @@ test('a card that verifies on iteration 1 ships', async () => {
   assert.equal(r.iterations, 1);
 });
 
+test('failing acceptance tests do NOT trip the consecutive-error breaker — the card uses its full iteration budget (round 28 #6)', async () => {
+  const NOW = Date.parse('2026-08-21T22:00:00Z');
+  const gov = new Governor({ maxTokensNight: 1e9, maxCostUsd: 1e9, nightDeadlineMs: NOW + 3600_000, maxConsecErrors: 3 });
+  const r = await runCard({ ...card, maxIterations: 5 }, deps({
+    now: () => NOW,
+    verify: async () => ({ pass: false, detail: { testOutput: 'still failing' } }),
+    writeNextPrompt: async () => 'try again',
+    governor: gov,
+  }));
+  assert.equal(r.outcome, 'parked');
+  assert.equal(r.iterations, 5);                       // ran all 5 — not stopped at maxConsecErrors=3
+  assert.match(r.whyLine, /no pass after 5/);          // parked on the ITERATION budget, not governor: consecutive-errors
+});
+
 test('runCardSafely PARKS a card whose runCard throws (clone/commit/unborn-HEAD) rather than aborting the night (round 18 #10)', async () => {
   const r = await runCardSafely(card, deps({ makeClone: () => { throw new Error('fatal: clone failed — disk full\n(second line ignored)'); } }));
   assert.equal(r.outcome, 'parked');                 // counts in the report's parked tally, doesn't vanish

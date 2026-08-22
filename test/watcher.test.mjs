@@ -5,6 +5,15 @@ import { classifyOutcome } from '../src/watcher.mjs';
 
 const NOW = Date.parse('2026-08-21T22:00:00Z');
 
+test('a subtype:success result FLAGGED is_error is NOT done — Claude reports billing/limit failures that way (round 28 #3)', () => {
+  // a plain limit message that isn't the RATE keyword shape → a real error, not a false "done" or a stall
+  assert.equal(classifyOutcome({ exitCode: 0, result: { subtype: 'success', is_error: true, result: "You've hit your limit" }, nowMs: NOW }).state, 'errored');
+  // the same shape carrying a canonical usage-limit phrase → rate-limited (waits for reset), still not done
+  assert.equal(classifyOutcome({ exitCode: 0, result: { subtype: 'success', is_error: true, result: 'You have hit your usage limit, try again in 30 minutes' }, nowMs: NOW }).state, 'rate-limited');
+  // a genuine success (no is_error) is still done, even if it MENTIONS a limit
+  assert.equal(classifyOutcome({ exitCode: 0, result: { subtype: 'success', result: 'fixed the rate limit bug' }, nowMs: NOW }).state, 'done');
+});
+
 test('success result → done', () => {
   const o = classifyOutcome({ exitCode: 0, result: { subtype: 'success', result: 'ok' }, text: 'ok', nowMs: NOW });
   assert.equal(o.state, 'done');

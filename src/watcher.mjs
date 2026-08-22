@@ -12,10 +12,14 @@ const NET = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|network (?:
 export function classifyOutcome({ exitCode, result, text, nowMs }) {
   const resultMsg = result?.result || '';
   const combined = `${text || ''} ${resultMsg}`;
+  // Claude Code reports billing/usage-limit failures with the CONTRADICTORY shape
+  // `subtype:'success', is_error:true` — so subtype alone can't mean success (round 28 #3).
+  const structuredError = result?.is_error === true;
 
   // 1. Structured success wins outright — a successful reply that merely MENTIONS a rate
-  //    limit ("fixed the rate limit") must not be misread as rate-limited (Codex H4).
-  if (result?.subtype === 'success' && exitCode === 0) return { state: 'done' };
+  //    limit ("fixed the rate limit") must not be misread as rate-limited (Codex H4) — but a
+  //    success FLAGGED is_error is NOT done; it falls through to the error classification below.
+  if (result?.subtype === 'success' && exitCode === 0 && !structuredError) return { state: 'done' };
 
   // 2. A nonzero exit with NO structured result is a TRANSPORT failure (crashed process,
   //    missing binary, signal, disk). Classify it before any rate/limit text-matching, so a
@@ -35,6 +39,10 @@ export function classifyOutcome({ exitCode, result, text, nowMs }) {
 
   // 4. Network mention on an otherwise-structured result.
   if (NET.test(combined)) return { state: 'network' };
+
+  // 5. A structured provider error that isn't a rate-limit or network issue is a real ERROR,
+  //    not a stall — otherwise a billing/limit failure would look like the agent just went quiet (round 28 #3).
+  if (structuredError) return { state: 'errored' };
 
   return { state: 'stalled' };
 }

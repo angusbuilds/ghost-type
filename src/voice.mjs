@@ -87,6 +87,9 @@ export async function distillVoiceProfile({ prompts, engine, maxEach = 500, maxT
       'Be concrete and quote real phrasings they use. Output only the markdown.',
     ].join('\n\n'),
   });
+  // A FAILED engine call returns its ERROR text (e.g. "fetch failed: ENOTFOUND"), not a profile —
+  // signal empty so `learn` won't persist the error over a good profile (round 28 #11).
+  if (r && (r.exitCode ?? 0) !== 0) return '';
   return (r.text || '').trim();
 }
 
@@ -101,6 +104,9 @@ export async function learn({ projectsDir, engine, sampleN = 200, perTag = 5, ou
   fs.mkdirSync(outDir, { recursive: true });
   const profilePath = path.join(outDir, 'voice-profile.md');
   const exemplarPath = path.join(outDir, 'exemplars.json');
+  // A failed/empty distillation must NOT overwrite a good existing profile (or exemplars) with an
+  // error string — a failed `ghost learn` is a no-op that keeps the last good voice (round 28 #11).
+  if (!profile) return { totalPrompts: all.length, sampled: sample.length, profilePath, exemplarPath, bank, skipped: 'distillation failed — kept existing voice' };
   // Cap the distilled profile before it's persisted — a runaway model response would otherwise
   // be stored uncapped and re-injected into every future prompt (round 5 review #7).
   fs.writeFileSync(profilePath, byteCap(profile, PROFILE_CAP) + '\n');
@@ -132,8 +138,10 @@ export function loadVoice(outDir = VOICE_DIR) {
 
 // Pick exemplars for a situation, falling back across tags so the writer always gets some.
 export function exemplarsFor(bank, situation, n = 4) {
-  const primary = bank[situation] || [];
-  if (primary.length >= n) return primary.slice(-n);
+  const primary = (bank[situation] || []).slice(-n);   // the freshest situation-specific examples, kept FIRST
+  if (primary.length >= n) return primary;
   const rest = SITUATIONS.filter(s => s !== situation).flatMap(s => bank[s] || []);
-  return [...primary, ...rest].slice(-n);
+  // Fill only the REMAINING slots with fallback — the old `[...primary, ...rest].slice(-n)` dropped the
+  // situation-specific example off the front whenever fallback existed (round 28 #10).
+  return [...primary, ...rest.slice(-(n - primary.length))];
 }

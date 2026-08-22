@@ -42,6 +42,31 @@ test('exemplarsFor falls back across tags when a situation is thin', () => {
   assert.equal(ex.length, 3);
 });
 
+test('exemplarsFor KEEPS the situation-specific example when filling from fallback (round 28 #10)', () => {
+  const bank = Object.fromEntries(SITUATIONS.map(s => [s, []]));
+  bank['kickoff'] = ['specific-kickoff'];              // one situation-specific example...
+  bank['continue'] = ['c1', 'c2', 'c3', 'c4', 'c5'];   // ...and plenty of fallback
+  const ex = exemplarsFor(bank, 'kickoff', 4);
+  assert.equal(ex.length, 4);
+  assert.ok(ex.includes('specific-kickoff'), 'the primary kickoff example must not be dropped off the front');
+  assert.equal(ex[0], 'specific-kickoff');             // kept FIRST, fallback fills the rest
+});
+
+test('a FAILED ghost learn does not overwrite a good voice profile with the error text (round 28 #11)', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-voicefail-'));
+  fs.writeFileSync(path.join(out, 'voice-profile.md'), '## Summary\nthe good learned voice\n');   // a valid existing profile
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-voicein-'));
+  fs.copyFileSync(path.resolve('test/fixtures/transcript-sample.jsonl'), path.join(dir, 'a.jsonl'));
+  // the engine FAILS: nonzero exit + error text (as the real engine returns on a network failure)
+  const engine = async () => ({ exitCode: 1, result: null, text: 'fetch failed: ENOTFOUND api.anthropic.com' });
+  const res = await learn({ projectsDir: dir, engine, sampleN: 50, outDir: out });
+  assert.match(res.skipped, /distillation failed/);
+  const kept = fs.readFileSync(path.join(out, 'voice-profile.md'), 'utf8');
+  assert.match(kept, /the good learned voice/);        // the good profile survived
+  assert.doesNotMatch(kept, /ENOTFOUND/);              // the error text was NOT persisted
+  fs.rmSync(out, { recursive: true, force: true }); fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('learn reads a transcript dir, distills via injected engine, writes files', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-voice-'));
   fs.copyFileSync(path.resolve('test/fixtures/transcript-sample.jsonl'), path.join(dir, 'a.jsonl'));
