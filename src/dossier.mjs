@@ -37,6 +37,18 @@ export function runnerAvailable(argv, { hasExe = realHasExe } = {}) {
   return Array.isArray(argv) && argv.length > 0 && hasExe(argv[0]);
 }
 
+// A repo using git-LFS (`filter=lfs`), any other clean/smudge FILTER, or a `working-tree-encoding`
+// has its blobs transformed on a normal `git add`. The integrity snapshot ships the raw worktree
+// bytes verbatim (to keep a hostile filter from executing in the daemon), which for these repos is
+// NOT git's canonical blob — LFS would commit the whole file instead of the pointer. Declare such a
+// repo unsupported rather than shipping a noncanonical tree (round 19 A2). `text=auto`/`eol` are NOT
+// flagged: those are cosmetic line-ending normalizations, common and benign on an all-LF macOS repo.
+export function usesTransformingFilters(repoPath) {
+  if (fs.existsSync(path.join(repoPath, '.lfsconfig'))) return true;
+  try { return /(^|\s)filter=|working-tree-encoding=/i.test(fs.readFileSync(path.join(repoPath, '.gitattributes'), 'utf8')); }
+  catch { return false; }
+}
+
 export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}) {
   const name = path.basename(repoPath.replace(/\/$/, ''));
   const testRunner = detectTestRunner(repoPath);
@@ -49,11 +61,14 @@ export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}
   // `rev-parse HEAD` throws mid-run. There's nothing to work on, so it must not become a card;
   // mark it non-runnable with a clear reason instead of letting a card park on a cryptic error (round 18 #8).
   try { gitRunner(repoPath, 'rev-parse', '--verify', 'HEAD'); hasHead = true; } catch { /* unborn — no commits yet */ }
+  const filtered = usesTransformingFilters(repoPath);
   return {
     name, repoPath, testRunner, runnerReady,
-    // Runnable unattended only if a runner is detected, its executable resolves, AND the repo has commits.
-    canRunUnattended: Boolean(testRunner) && runnerReady && hasHead,
-    unrunnableReason: !hasHead ? 'repository has no commits yet — nothing to clone or work on' : undefined,
+    // Runnable unattended only if a runner is detected, its executable resolves, the repo has commits,
+    // and it doesn't rely on check-in filters/LFS the snapshot can't reproduce (round 19 A2).
+    canRunUnattended: Boolean(testRunner) && runnerReady && hasHead && !filtered,
+    unrunnableReason: !hasHead ? 'repository has no commits yet — nothing to clone or work on'
+                     : (filtered ? 'repo uses git-LFS or check-in filters — unsupported (the snapshot would ship noncanonical blobs)' : undefined),
     branch, lastCommit, dirty, unborn: !hasHead,
     hasResume: fs.existsSync(path.join(repoPath, 'RESUME.md')),
     hasTodo: fs.existsSync(path.join(repoPath, 'TODO.md')) || fs.existsSync(path.join(repoPath, 'TODO')),

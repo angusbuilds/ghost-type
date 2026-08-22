@@ -75,10 +75,11 @@ does **not** re-apply check-in conversions when it commits:
   contains CRLF would commit as CRLF. Git does **not** automatically renormalize this on merge
   (`merge.renormalize` is off by default), so a CRLF-in-worktree repo can carry noncanonical line
   endings into the merge — cosmetic, but real. Review the morning diff.
-- **Git LFS:** an LFS-tracked file is committed as its real bytes, not the pointer. **LFS repos are
-  not supported** — don't point Ghost Type at one.
-- **`ident` / `working-tree-encoding` filters:** the worktree bytes are shipped verbatim, which can
-  differ from git's canonical blob. Not supported.
+- **Git LFS / clean-smudge / `working-tree-encoding` filters:** the worktree bytes are shipped
+  verbatim, which is not git's canonical blob (LFS would commit the whole file, not the pointer).
+  **These repos are refused at scan time** — a repo with `filter=` in `.gitattributes`, a `.lfsconfig`,
+  or a `working-tree-encoding` is marked non-runnable with a clear reason, so no card is ever planned
+  against it. (`text=auto`/`eol` are *not* refused — cosmetic line-ending normalization, see above.)
 
 **Submodules:** clones are made without `--recurse-submodules`, so a repo whose **tests depend on
 submodule contents** fails acceptance in the clone — the card parks, it never ships a broken result.

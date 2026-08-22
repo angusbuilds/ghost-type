@@ -7,6 +7,29 @@ import path from 'node:path';
 import { detectTestRunner, scanRepo, runnerAvailable } from '../src/dossier.mjs';
 import { execFileSync } from 'node:child_process';
 
+test('scanRepo marks a git-LFS / check-in-filter repo unsupported, but NOT a plain text=auto repo (round 19 A2)', () => {
+  const mk = (attrs) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lfs-'));
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: d }); execFileSync('git', ['config', 'user.name', 't'], { cwd: d });
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+    fs.writeFileSync(path.join(d, '.gitattributes'), attrs);
+    fs.writeFileSync(path.join(d, 'a.js'), '1');
+    execFileSync('git', ['add', '-A'], { cwd: d }); execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: d });   // give it a HEAD
+    return d;
+  };
+  const lfs = mk('*.bin filter=lfs diff=lfs merge=lfs -text\n');
+  const dl = scanRepo(lfs, { hasExe: () => true });
+  assert.equal(dl.canRunUnattended, false);
+  assert.match(dl.unrunnableReason, /LFS|filter/i);
+  fs.rmSync(lfs, { recursive: true, force: true });
+
+  const eol = mk('* text=auto\n');                         // cosmetic line-ending normalization...
+  const de = scanRepo(eol, { hasExe: () => true });
+  assert.equal(de.canRunUnattended, true);                 // ...is NOT flagged unsupported
+  fs.rmSync(eol, { recursive: true, force: true });
+});
+
 test('scanRepo marks an UNBORN repo (no commits) non-runnable with a clear reason (round 18 #8)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-unborn-'));
   execFileSync('git', ['init', '-q'], { cwd: d });
