@@ -90,11 +90,33 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
 - Plus: all GitHub/Stripe secret formats; per-file/aggregate/binary destructive-diff detection;
   fail-closed power/disk/arm checks; crash-orphan preservation.
 
+### Hardening (rounds 13–20)
+- **Sterile snapshot** — the candidate tree is now built from RAW filesystem bytes
+  (`hash-object --no-filters` into a throwaway index, every executable git-config path disabled),
+  so no repo-controlled clean/smudge/ident filter, fsmonitor hook, or stale-index flag can run code
+  in the daemon or make the frozen tree differ from the bytes acceptance tested.
+- **Submodule integrity** — a clean gitlink is preserved; a dirty, deleted, type-changed, or moved
+  submodule is refused; an **added/content-changed gitlink is refused outright** (its nested commit
+  can't be published, so the branch would reference an unavailable object).
+- **Per-card boundary** — one card's clone/commit/unborn-HEAD throw now parks that card and the
+  night continues (`runCardSafely`), instead of aborting the whole queue.
+- **Same-day reruns don't collide** — a repeated goal ships a sibling `ghost/…-2` branch instead of
+  being silently rejected as a non-fast-forward on fetch-back.
+- **Disk hygiene, safely** — a completed clone is reaped once its verified commit is OID-pinned back
+  in the source repo, **unless** it holds candidate-created ignored state absent from the shipped
+  tree (that clone is preserved for review).
+- **Unsupported repos are refused at scan** — unborn (no-commit) repos, and repos using git-LFS /
+  check-in filters / `working-tree-encoding`, are marked non-runnable with a clear reason rather than
+  silently shipping a broken or noncanonical tree. (`text=auto` line-ending repos stay runnable.)
+- **Accounting** — the night's cost is sourced from the governor (a card that throws after metering
+  no longer drops its spend); a fetch-back failure parks with the real error, not a false "shipped".
+- **Newline-in-filename** paths snapshot via NUL-delimited `update-index -z --index-info`.
+
 ### Proof
 - 259 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main
   untouched, no push); the OS sandbox verified to block external writes while keeping the API up.
-- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across eighteen rounds — each round
+- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across nineteen rounds — each round
   verifying the prior round's fixes held and were complete, not just plausible.
