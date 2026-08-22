@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-274%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-275%20passing-brightgreen">
   <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A526-blue">
   <img alt="deps" src="https://img.shields.io/badge/runtime%20deps-0-blueviolet">
   <img alt="engines" src="https://img.shields.io/badge/engines-Claude%20%2B%20Codex-8b5cf6">
@@ -92,7 +92,7 @@ A hand-built explainer with cinematic clips (generated via Higgsfield) lives in
 ```bash
 git clone https://github.com/hangryclaude/ghost-type
 cd ghost-type
-node --test          # 274 tests, all offline — spends no tokens
+node --test          # 275 tests, all offline — spends no tokens
 ```
 
 Run one real card end-to-end against a scratch repo (this is the live smoke test):
@@ -182,7 +182,7 @@ battery or low disk, so a sleeping laptop is a no-op.
 ✅  haunt mode        select a terminal from the menu bar → it turns purple → it drives it
 ✅  report            theme-aware HTML · morning push notification · prompt lineage
 
-274 tests, all offline (`node --test`) · independently audited by Codex (gpt-5.6-sol, xhigh) across twenty-six rounds — every finding fixed
+275 tests, all offline (`node --test`) · independently audited by Codex (gpt-5.6-sol, xhigh) across twenty-seven rounds — every finding fixed
 ```
 
 Ghost Type never trusts a "done" claim — it re-runs the test itself and flags a
