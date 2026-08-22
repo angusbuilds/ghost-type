@@ -235,6 +235,25 @@ test('hasIgnoredState is true when a populated submodule exists (its ignored dep
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+test('verifyCard REFUSES a non-ignored EMPTY directory git can\'t represent (false pass on fresh checkout), allows an ignored one (round 26)', async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-emptydir-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'a.js'), '1'); g('add', '-A'); g('commit', '-q', '-m', 'base');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  fs.writeFileSync(path.join(d, 'feature.js'), 'the shipped change');   // a real change...
+  fs.mkdirSync(path.join(d, 'runtime'));                                // ...+ a non-ignored EMPTY dir the test might need
+  const v = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'add feature', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(v.pass, false);
+  assert.match(v.detail.testOutput, /empty director|\.gitkeep/i);
+  // an IGNORED empty dir is fine — its absence from the tree is intended, not a false pass
+  fs.rmSync(path.join(d, 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(d, '.gitignore'), 'cache/\n'); fs.mkdirSync(path.join(d, 'cache'));
+  const v2 = await verifyCard({ acceptanceArgv: ['true'], acceptanceTimeoutSec: 10, goal: 'add feature', branch: 'ghost/x' }, d, { baseRef: base });
+  assert.equal(v2.pass, true);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('verifyCard REFUSES an empty candidate (frozen tree identical to base) — no empty commit ships, no real commit lost (round 20 #4)', async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-empty-'));
   const g = (...a) => execFileSync('git', a, { cwd: d });

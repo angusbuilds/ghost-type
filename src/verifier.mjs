@@ -222,6 +222,15 @@ export async function verifyCard(card, clonePath, { baseRef, git = gitOut, sandb
       }
     }
   }
+  // Git cannot represent an EMPTY directory, so a non-ignored empty dir the candidate created (that a
+  // test might depend on) is absent from the frozen tree — acceptance passes locally while a fresh
+  // checkout fails, and reaping then deletes the only copy. Detect it (dir entries present with
+  // --directory but excluded by --no-empty-directory) and refuse with a hint to add a tracked
+  // sentinel like .gitkeep (round 26).
+  const lsDir = (...extra) => new Set(execFileSync('git', [...STERILE, 'ls-files', '--others', '--exclude-standard', '--directory', ...extra, '-z'], { cwd: clonePath, maxBuffer: MAXBUF }).toString().split('\0').filter(Boolean));
+  const nonEmptyDirs = lsDir('--no-empty-directory');
+  const emptyDirs = [...lsDir()].filter(x => x.endsWith('/') && !nonEmptyDirs.has(x));
+  if (emptyDirs.length) return { pass: false, detail: { testOutput: `refusing: non-ignored empty director${emptyDirs.length > 1 ? 'ies' : 'y'} ${emptyDirs.join(', ')} can't be represented in a git tree — add a tracked sentinel (e.g. .gitkeep) so it ships (round 26)` } };
   // Snapshot whether the candidate holds ignored state BEFORE the test runs — the test may read then
   // delete it, so a post-acceptance check would miss it. This rides the pass result so the caller can
   // decide whether reaping the clone is safe (round 20 #3).
