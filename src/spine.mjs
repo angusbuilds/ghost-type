@@ -24,6 +24,7 @@ export async function runCard(card, deps) {
     voteBest = async ({ candidates }) => ({ choice: candidates[0], index: 0 }),
     recordPrompt = () => {},                 // lineage sink (defaulted off for tests)
     governor = null,                         // if present, meters EVERY engine call (Codex H5)
+    costSink = null,                         // mutable {tokensUsed,costUsd}; lets runCardSafely recover partial spend on a throw (round 20 #5)
   } = deps;
 
   const clonePath = makeClone(card.repoPath, card.branch.replace(/[^\w.-]/g, '_'));
@@ -41,7 +42,7 @@ export async function runCard(card, deps) {
 
   // Every engine call — main, diagnosis, candidates, vote — goes through here so the
   // governor sees all of them and the token counter is honest (Codex H5).
-  const meter = (r) => { if (r?.usage) { tokensUsed += (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); governor?.addUsage(r.usage); } const c = r?.costUsd ?? r?.result?.total_cost_usd; if (c) { costUsd += c; governor?.addCost(c); } return r; };
+  const meter = (r) => { if (r?.usage) { const t = (r.usage.input_tokens || 0) + (r.usage.output_tokens || 0); tokensUsed += t; if (costSink) costSink.tokensUsed += t; governor?.addUsage(r.usage); } const c = r?.costUsd ?? r?.result?.total_cost_usd; if (c) { costUsd += c; if (costSink) costSink.costUsd += c; governor?.addCost(c); } return r; };
   const govCheck = () => { if (governor) { const c = governor.check(now()); if (!c.ok) { const e = new Error('GOVERNOR_TRIP'); e.trip = c.trip; throw e; } } };
   // Bind EVERY call — main and writer — to the governor's remaining headroom: budget capped to
   // remaining nightly dollars, timeout to min(45-min ceiling, time-to-deadline). Without this a
@@ -177,17 +178,18 @@ function park(card, why, iterations, testOutput, promptsWritten, patterns, false
 // returns them as park results), and the caller's between-card governor checks still stop the night
 // on a real budget/deadline trip. The parked-shaped result counts correctly in the morning report.
 export async function runCardSafely(card, deps) {
+  // A shared sink meter() writes to, so spend metered BEFORE a throw is recovered here even when there
+  // is no governor to hold it (round 20 #5 — the governor path was already covered by round 19 A4).
+  const costSink = { tokensUsed: 0, costUsd: 0 };
   try {
-    return await runCard(card, deps);
+    return await runCard(card, { ...deps, costSink });
   } catch (e) {
     const why = String(e?.message || e).split('\n')[0];
     log({ evt: 'card-errored', project: card.project, why });
     return { project: card.project, goal: card.goal, outcome: 'parked', mergeReady: false,
              whyLine: `card errored and was parked: ${why}`, iterations: 0, branch: card.branch,
              testOutput: byteCap(String(e?.stack || e?.message || e), 2000), promptsWritten: [], falseDoneCount: 0, ledger: [],
-             // Any spend before the throw was already metered into the governor; keep 0 here for shape,
-             // and let runNight source the night's cost from the governor so it isn't dropped (round 19 A4).
-             tokensUsed: 0, costUsd: 0 };
+             tokensUsed: costSink.tokensUsed, costUsd: costSink.costUsd };
   }
 }
 

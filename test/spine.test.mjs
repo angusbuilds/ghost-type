@@ -58,8 +58,21 @@ test('runNight reports the GOVERNOR cost even when a card throws AFTER its engin
     governor: gov,
   });
   const night = await runNight([card], d);
-  assert.equal(night.cards[0].outcome, 'parked');    // the throw parked the card (per-card cost field is 0)...
+  assert.equal(night.cards[0].outcome, 'parked');    // the throw parked the card...
   assert.ok(night.costUsd >= 0.25);                  // ...but the $0.25 already metered is NOT dropped from the night total
+});
+
+test('runNight WITHOUT a governor still reports cost metered before a card threw (round 20 #5)', async () => {
+  const d = deps({
+    now: () => Date.parse('2026-08-21T22:00:00Z'),
+    runEngine: async () => ({ exitCode: 0, result: { subtype: 'success', result: 'done', total_cost_usd: 0.25 }, usage: { input_tokens: 10, output_tokens: 5 }, text: 'done' }),
+    verify: async () => { throw new Error('verify blew up after metering'); },
+    // NO governor — the metered spend must still be recovered via the cost sink
+  });
+  const night = await runNight([card], d);
+  assert.equal(night.cards[0].outcome, 'parked');
+  assert.ok(night.cards[0].costUsd >= 0.25);         // the parked card carries its pre-throw spend...
+  assert.ok(night.costUsd >= 0.25);                  // ...and the night total (summed, no governor) isn't zero
 });
 
 test('the engine call is bounded to remaining $ AND the 45-min ceiling, not the full budget/deadline (round 7 H3)', async () => {
