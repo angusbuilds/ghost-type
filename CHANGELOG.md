@@ -71,9 +71,29 @@ next prompt in the owner's voice, driven from a CLI or a native menu-bar app.
   prompt are capped; a failed writer call can't become a candidate; the vote index parses robustly;
   aborted live injection clears stranded text with Ctrl-U (shell only).
 
+### Hardening (rounds 6–12)
+- **Timeouts that actually stop** — every engine + acceptance call runs under a wall-clock
+  deadline that settles independently of process exit and kills the whole process group, so a
+  detached grandchild can't hang the run.
+- **Candidate integrity** — before the (agent-modifiable) acceptance test runs, the full
+  candidate tree is frozen (`git write-tree`, tracked + untracked, `.gitignore`-aware); any change
+  to it afterward is refused. This defeats a rigged test that erases or rewrites its own patch to
+  fake a pass — including the untracked-file and content-corruption variants.
+- **Opt-in OS sandbox** (`"sandbox": true`, macOS) — confines the coding session's writes to the
+  clone (network stays up for the API) and denies network in the acceptance test; for untrusted repos.
+- **Codex actually works** — the parser was rewritten for the current `codex` 0.148 event schema
+  and the adapter no longer hangs on stdin; both Claude and Codex are now live-validated shipping
+  a real feature end-to-end.
+- **Hard caps bound every call** — budget = `min(card, remaining$)`, timeout = `min(45min,
+  to-deadline)`, on the main call and every writer call; the night parks below a floor.
+- Plus: all GitHub/Stripe secret formats; per-file/aggregate/binary destructive-diff detection;
+  fail-closed power/disk/arm checks; crash-orphan preservation.
+
 ### Proof
-- 211 offline unit tests (`node --test`), zero runtime dependencies.
-- Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. a committed-deletion attack.
-- A live smoke shipped a real feature end-to-end with real tokens, main untouched.
-- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across five rounds — each round
+- 228 offline unit tests (`node --test`), zero runtime dependencies.
+- Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
+  test-erases-its-own-patch attacks.
+- Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main
+  untouched, no push); the OS sandbox verified to block external writes while keeping the API up.
+- Independently audited by Codex (`gpt-5.6-sol`, xhigh) across a dozen rounds — each round
   verifying the prior round's fixes held and were complete, not just plausible.
