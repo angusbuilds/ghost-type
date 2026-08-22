@@ -140,6 +140,25 @@ test('injectPrompt skips Enter when beforeEnter fails after the pause (round 4 #
   assert.deepEqual(calls, ['keep going']);   // text was typed, but Enter was NOT sent into a changed world
 });
 
+test('driveStep still sends Enter when the TUI ECHOES the typed prompt (pane changes after typing) (round 27)', async () => {
+  const sent = [];
+  let typed = false;
+  const r = await driveStep({ paneId: '%3', goal: 'keep fixing the parser', prev: 'agent output here', deps: {
+    runner: (...a) => {
+      if (a[0] === 'list-panes') return '%3';
+      if (a[0] === 'display-message') return 'claude';                              // a live agent throughout
+      return typed ? 'agent output here\n> keep fixing the parser' : 'agent output here';   // pane ECHOES after typing
+    },
+    sendKeys: (id, k) => { sent.push(k); if (k !== 'Enter' && k !== 'C-u') typed = true; },
+    humanIdleSecs: () => 999,
+    engine: async () => ({ text: 'keep fixing the parser' }),
+    voice: { profile: '', bank: {} }, sleep: async () => {},
+  }});
+  assert.equal(r.state, 'injected');                     // NOT 'aborted' — our own echo must not block Enter
+  assert.ok(sent.includes('Enter'), 'Enter was sent despite the pane changing from the echo');
+  assert.ok(!sent.includes('C-u'), 'no Ctrl-U — this was a live agent, not a shell exit');
+});
+
 test('driveStep clears stranded text with Ctrl-U when the agent exits to a shell mid-delay (round 5 H3)', async () => {
   // agent recognized on the first pass; by the time beforeEnter runs, the pane is a bare shell.
   let cmdCall = 0;
