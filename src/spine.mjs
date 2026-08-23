@@ -233,6 +233,13 @@ export async function runProposal(card, deps) {
   } catch (e) { return skip(`proposal errored: ${String(e?.message || e).split('\n')[0]}`); }
 }
 
+// ⚠ NOT the production night loop. The daemon reimplements the loop inline in bin/ghost.mjs's `on`
+// case (it needs per-card deps for lineage, an interrupt check, and per-card fetch-back + reapClone
+// that don't fit this single-deps signature). This is a REFERENCE implementation of the core
+// governor-gating + skip-remaining logic, exercised by the loop tests — its green tests do NOT cover
+// the real loop, so a change to the caps/skip logic must be mirrored in bin/ghost.mjs (round 31: the
+// real loop had 5 wiring bugs this never caught). Deduping the two behind one tested core is a
+// worthwhile refactor when there's room to verify it end-to-end.
 export async function runNight(cards, deps) {
   const results = [];
   const gov = deps.governor;
