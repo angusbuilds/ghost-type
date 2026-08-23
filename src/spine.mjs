@@ -278,6 +278,18 @@ export function shipCard(card, r, { fetchBranchBack, reapClone, workDir }) {
   return r;
 }
 
+// The proposal-card equivalent of shipCard: once a proposal wrote PLAN.md and committed it, fetch that
+// commit back and reap the clone. A fetch failure parks it (NOT left 'proposed') and preserves the clone
+// — the plan never reached the source, so it's the only copy (round 31 night audit #3 fetch-fail→parked,
+// #5 reap). Simpler than shipCard: no acceptance, so no hadIgnoredState. Mutates and returns r.
+export function shipProposal(card, r, { fetchBranchBack, reapClone, workDir }) {
+  if (r.outcome !== 'proposed' || !r.commitOid) return r;
+  const cloneName = card.branch.replace(/[^\w.-]/g, '_');
+  try { fetchBranchBack(card.repoPath, path.join(workDir, cloneName), card.branch, r.commitOid); reapClone(cloneName); }
+  catch (e) { r.outcome = 'parked'; r.mergeReady = false; r.whyLine = `plan written but couldn't fetch the branch back: ${String(e.message).split('\n')[0]}`; }
+  return r;
+}
+
 // ⚠ Still NOT the production night loop (the daemon's `on` case remains inline pending the gated
 // step 3 of the dedupe plan). Now a thin wrapper over runCardQueue so its tests exercise the SHARED
 // core — the same loop the bin will adopt — instead of a divergent copy.

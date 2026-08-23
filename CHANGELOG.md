@@ -140,7 +140,7 @@ parent dir, gitlink; nested untracked repos; non-ignored empty dirs git can't st
   count and footprint so the owner can review and clear them — advisory, never fatal.
 
 ### Proof
-- 351 offline unit tests (`node --test`), zero runtime dependencies.
+- 354 offline unit tests (`node --test`), zero runtime dependencies.
 - Soup-to-nuts e2e on real git/fs (only the LLM scripted), incl. committed-deletion and
   test-erases-its-own-patch attacks.
 - Live-validated: both Claude and Codex shipped a real feature end-to-end (real tokens, main

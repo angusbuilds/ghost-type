@@ -16,7 +16,7 @@ import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reapClone, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
-import { runCardSafely, runProposal, shipCard } from '../src/spine.mjs';
+import { runCardSafely, runProposal, shipCard, shipProposal } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
@@ -248,14 +248,8 @@ async function main() {
           const deps = cardDeps(c, voice); deps.governor = gov;
           deps.writePlan = (cp, content) => fs.writeFileSync(path.join(cp, 'PLAN.md'), content);
           const r = await runProposal(c, deps);
-          if (r.outcome === 'proposed' && r.commitOid) {
-            const cn = c.branch.replace(/[^\w.-]/g, '_');
-            // Reap the proposal clone once its PLAN.md commit is safely fetched back — like coding cards
-            // (round 31 night audit #5). On a fetch failure, park (not left 'proposed') and PRESERVE the
-            // clone: the plan never reached the source, so it's the only copy (round 31 night audit #3).
-            try { fetchBranchBack(c.repoPath, path.join(WORK_DIR, cn), c.branch, r.commitOid); reapClone(cn); }
-            catch (e) { r.outcome = 'parked'; r.mergeReady = false; r.whyLine = `plan written but couldn't fetch the branch back: ${String(e.message).split('\n')[0]}`; }
-          }
+          // Fetch the PLAN.md commit back + reap (or park+preserve on fetch-fail) — tested shipProposal (round 31).
+          shipProposal(c, r, { fetchBranchBack, reapClone, workDir: WORK_DIR });
           results.push(r);
           const post = gov.check(Date.now());   // a trip on the LAST proposal must still reach the report (round 31 night audit #4)
           if (!post.ok && !tripReason) tripReason = post.trip;

@@ -1,7 +1,7 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard, runCardSafely, runNight, runProposal, runCardQueue, shipCard } from '../src/spine.mjs';
+import { runCard, runCardSafely, runNight, runProposal, runCardQueue, shipCard, shipProposal } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
 
 test('runProposal has the agent write PLAN.md and commits it to the branch, reported as proposed (round 28 #13)', async () => {
@@ -348,4 +348,37 @@ test('shipCard is a no-op for a non-merge-ready card (round 31 dedupe)', () => {
   const out = shipCard({ repoPath: '/r', branch: 'ghost/w' }, r, { fetchBranchBack: () => { touched = true; }, reapClone: () => { touched = true; }, workDir: '/w' });
   assert.equal(touched, false);
   assert.equal(out, r);
+});
+
+// shipProposal: the proposal-card equivalent of shipCard — locks the round-31 night-audit fixes #3
+// (fetch-fail → parked, not left 'proposed') and #5 (reap the clone after the PLAN.md commit lands).
+test('shipProposal fetches the plan commit back and reaps the clone (round 31 night audit #5)', () => {
+  const calls = { fetch: null, reap: null };
+  const r = { outcome: 'proposed', mergeReady: false, commitOid: 'poid' };
+  shipProposal({ repoPath: '/r', branch: 'ghost/p' }, r, {
+    fetchBranchBack: (repo, clone, branch, oid) => { calls.fetch = [repo, clone, branch, oid]; },
+    reapClone: (n) => { calls.reap = n; }, workDir: '/w',
+  });
+  assert.deepEqual(calls.fetch, ['/r', '/w/ghost_p', 'ghost/p', 'poid']);
+  assert.equal(calls.reap, 'ghost_p');
+  assert.equal(r.outcome, 'proposed');
+});
+
+test('shipProposal PARKS (not left proposed) and preserves the clone on a fetch failure (round 31 night audit #3)', () => {
+  let reaped = null;
+  const r = { outcome: 'proposed', mergeReady: false, commitOid: 'poid' };
+  const out = shipProposal({ repoPath: '/r', branch: 'ghost/q' }, r, {
+    fetchBranchBack: () => { throw new Error('non-ff\nx'); }, reapClone: (n) => { reaped = n; }, workDir: '/w',
+  });
+  assert.equal(out.outcome, 'parked');
+  assert.equal(out.mergeReady, false);
+  assert.match(out.whyLine, /plan written but couldn't fetch the branch back: non-ff/);
+  assert.equal(reaped, null);
+});
+
+test('shipProposal is a no-op for a skipped proposal (no commit) (round 31 night audit)', () => {
+  let touched = false;
+  const r = { outcome: 'skipped', mergeReady: false };
+  shipProposal({ repoPath: '/r', branch: 'ghost/s' }, r, { fetchBranchBack: () => { touched = true; }, reapClone: () => { touched = true; }, workDir: '/w' });
+  assert.equal(touched, false);
 });
