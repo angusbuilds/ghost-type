@@ -56,6 +56,29 @@ test('scanRepo marks a git-LFS / check-in-filter repo unsupported, but NOT a pla
   fs.rmSync(eol, { recursive: true, force: true });
 });
 
+test('scanRepo surfaces packageManager so a test/-dir repo without scripts.test can still bootstrap its deps (round 33 HIGH)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-pmsurface-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  execFileSync('git', ['config', 'user.email', 't@t'], { cwd: d }); execFileSync('git', ['config', 'user.name', 't'], { cwd: d });
+  // deps + declared pnpm, but NO scripts.test → detectTestRunner falls back to ['node','--test']
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ dependencies: { 'is-odd': '^3' }, packageManager: 'pnpm@8.6.0' }));
+  fs.mkdirSync(path.join(d, 'test')); fs.writeFileSync(path.join(d, 'test', 'a.test.js'), '// t');
+  execFileSync('git', ['add', '-A'], { cwd: d }); execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: d });
+  const r = scanRepo(d, { hasExe: () => true });
+  assert.deepEqual(r.testRunner, ['node', '--test']);   // the fallback runner...
+  assert.equal(r.packageManager, 'pnpm');               // ...but the real pm is surfaced for the install grant
+  fs.rmSync(d, { recursive: true, force: true });
+
+  // a non-JS repo (no package.json) surfaces null — cargo/go/pytest fetch their own deps
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-pmgo-'));
+  execFileSync('git', ['init', '-q'], { cwd: g });
+  execFileSync('git', ['config', 'user.email', 't@t'], { cwd: g }); execFileSync('git', ['config', 'user.name', 't'], { cwd: g });
+  fs.writeFileSync(path.join(g, 'go.mod'), 'module x\n'); fs.writeFileSync(path.join(g, 'x.go'), 'package x');
+  execFileSync('git', ['add', '-A'], { cwd: g }); execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: g });
+  assert.equal(scanRepo(g, { hasExe: () => true }).packageManager, null);
+  fs.rmSync(g, { recursive: true, force: true });
+});
+
 test('scanRepo marks an UNBORN repo (no commits) non-runnable with a clear reason (round 18 #8)', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-unborn-'));
   execFileSync('git', ['init', '-q'], { cwd: d });

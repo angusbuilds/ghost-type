@@ -72,7 +72,7 @@ const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: ['ignore', 'pipe
 
 function realEngine(card) {
   const env = buildSessionEnv([], process.env, card.engine);   // only this engine's creds (round 5 M9)
-  const allowedTools = allowedToolsFor(card.acceptanceArgv || ['true']);
+  const allowedTools = allowedToolsFor(card.acceptanceArgv || ['true'], card.packageManager);
   // Dispatch by the card's engine. Coding calls get the shaped prompt + full tools; WRITER
   // calls (diagnosis/candidates/vote) get a read-only, tiny-budget model that can't touch
   // the clone (Codex H6) and aren't shaped (they're meta-prompts, not for the coding agent).

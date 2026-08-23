@@ -51,6 +51,7 @@ export function planCards({ sendoff, dossiers, dateStr, unmergedByProject = {}, 
       cards.push(validateCard({
         project: d.name, repoPath: d.repoPath, goal,
         acceptanceArgv: d.testRunner, acceptanceTimeoutSec: 600, branch,
+        packageManager: d.packageManager ?? null,   // so allowedToolsFor grants the install even for a `node --test` runner (round 33)
         maxIterations: 6, maxTurns: 40, maxBudgetUsd: 4, situation: 'kickoff', engine,
       }));
     } else {

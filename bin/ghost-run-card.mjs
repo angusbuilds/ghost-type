@@ -19,7 +19,7 @@ import path from 'node:path';
 const card = loadCard(process.argv[2]);
 const CONFIG = loadConfig();
 const env = buildSessionEnv([], process.env, card.engine);   // scope creds to the card's engine (round 5 M9)
-const allowedTools = allowedToolsFor(card.acceptanceArgv);
+const allowedTools = allowedToolsFor(card.acceptanceArgv, card.packageManager);
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, maxBuffer: 256 * 1024 * 1024 }).toString();   // 1 MiB default ENOBUFS'd on a large diff (round 22 #5)
 
 const deps = {

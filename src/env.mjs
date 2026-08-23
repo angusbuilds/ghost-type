@@ -47,12 +47,20 @@ const INSTALL_CMDS = {
 // Build the --allowedTools value: reads/edits/writes, the exact test runner as a Bash command, the
 // package manager's INSTALL command (so the clone's missing deps can be bootstrapped), and git
 // plumbing that can never push. No gh/curl/deploy/publish.
-export function allowedToolsFor(testRunnerArgv) {
+export function allowedToolsFor(testRunnerArgv, packageManager = null) {
   const runner = testRunnerArgv.join(' ');
+  // Grant the install command for BOTH the acceptance command's own tool (npm/pnpm/yarn/bun/pytest) AND
+  // the repo's package manager — they diverge when a JS repo has a test/ dir but no scripts.test, detected
+  // as `node --test`: node has no INSTALL_CMDS entry, so without the pm the clone could never bootstrap its
+  // gitignored deps and burned the whole budget on MODULE_NOT_FOUND every night (round 33). Deduped.
+  const installs = [...new Set([
+    ...(INSTALL_CMDS[testRunnerArgv[0]] || []),
+    ...(packageManager ? INSTALL_CMDS[packageManager] || [] : []),
+  ])];
   return [
     'Read', 'Edit', 'Write',
     `Bash(${runner})`,
-    ...(INSTALL_CMDS[testRunnerArgv[0]] || []),
+    ...installs,
     'Bash(git diff *)', 'Bash(git status *)', 'Bash(git add *)',
     'Bash(git commit *)', 'Bash(git checkout -b *)', 'Bash(git log *)',
   ].join(',');

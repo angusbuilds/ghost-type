@@ -78,6 +78,16 @@ export function usesTransformingFilters(repoPath) {
 export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}) {
   const name = path.basename(repoPath.replace(/\/$/, ''));
   const testRunner = detectTestRunner(repoPath);
+  // The package manager, surfaced independently of the runner — a JS repo detected as `node --test`
+  // (test/ dir, no scripts.test) still needs its pm's install command granted, or the clone can't
+  // bootstrap deps (round 33). null for a non-JS repo (cargo/go/pytest fetch their own).
+  let packageManager = null;
+  const pkgPath = path.join(repoPath, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    let pkg = {};
+    try { pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')); } catch { /* malformed → lockfile fallback */ }
+    packageManager = detectPackageManager(repoPath, pkg);
+  }
   const runnerReady = testRunner ? runnerAvailable(testRunner, { hasExe }) : false;
   let branch = '', lastCommit = '', dirty = false, hasHead = false;
   try { branch = gitRunner(repoPath, 'rev-parse', '--abbrev-ref', 'HEAD').trim(); } catch { /* not a repo */ }
@@ -91,7 +101,7 @@ export function scanRepo(repoPath, { gitRunner = git, hasExe = realHasExe } = {}
   try { gitRunner(repoPath, 'rev-parse', '--verify', 'HEAD'); hasHead = true; } catch { /* unborn — no commits yet */ }
   const filtered = usesTransformingFilters(repoPath);
   return {
-    name, repoPath, testRunner, runnerReady,
+    name, repoPath, testRunner, runnerReady, packageManager,
     // Runnable unattended only if a runner is detected, its executable resolves, the repo has commits,
     // and it doesn't rely on check-in filters/LFS the snapshot can't reproduce (round 19 A2).
     canRunUnattended: Boolean(testRunner) && runnerReady && hasHead && !filtered,

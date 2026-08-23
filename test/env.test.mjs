@@ -64,6 +64,20 @@ test('allowedToolsFor lets the agent INSTALL deps for the detected manager (clon
   assert.doesNotMatch(allowedToolsFor(['cargo', 'test']), /install/);
 });
 
+test('allowedToolsFor grants the package manager install even when the acceptance is `node --test` (round 33 HIGH — #12b variant)', () => {
+  // A JS repo with deps + a test/ dir but no scripts.test detects as ['node','--test']; node has no
+  // INSTALL_CMDS entry, so the clone could NEVER bootstrap its (gitignored) deps and burned the full
+  // budget every night on MODULE_NOT_FOUND. The package manager must be granted independent of argv[0].
+  const tools = allowedToolsFor(['node', '--test'], 'pnpm');
+  assert.match(tools, /Bash\(pnpm install\)/, 'the clone can bootstrap deps with its real package manager');
+  assert.match(tools, /Bash\(node --test\)/, 'and still run the node --test acceptance');
+  // without the pm, node --test alone grants NO install — the bug this closes
+  assert.doesNotMatch(allowedToolsFor(['node', '--test']), /Bash\((npm|pnpm|yarn|bun) install\)/);
+  // pm + a pm-test acceptance must not duplicate the install grant
+  const dup = allowedToolsFor(['npm', 'test'], 'npm');
+  assert.equal(dup.match(/Bash\(npm install\)/g).length, 1, 'no duplicate install grant');
+});
+
 test('buildSessionEnv: extraAllow can add app vars but NEVER another engine\'s provider key (round 29)', () => {
   const src = { PATH: '/b', ANTHROPIC_API_KEY: 'sk-ant', OPENAI_API_KEY: 'sk-oai', DATABASE_URL: 'postgres://x' };
   // a Codex session that (mis)lists ANTHROPIC_API_KEY in extraAllow must still NOT receive it
