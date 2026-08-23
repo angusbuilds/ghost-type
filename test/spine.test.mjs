@@ -1,7 +1,7 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard, runCardSafely, runNight, runProposal } from '../src/spine.mjs';
+import { runCard, runCardSafely, runNight, runProposal, runCardQueue } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
 
 test('runProposal has the agent write PLAN.md and commits it to the branch, reported as proposed (round 28 #13)', async () => {
@@ -255,4 +255,55 @@ test('the ship gate requires v.pass === true, not merely truthy (round 31 spine 
   }));
   assert.notEqual(r.outcome, 'shipped');   // a malformed/non-boolean pass must not ship the most critical gate
   assert.equal(r.mergeReady, false);
+});
+
+// runCardQueue: the shared per-phase loop core both runNight and the daemon's `on` loop will use.
+// Fully unit-testable with fakes (no engine/API) — this is what makes the night-loop dedupe safe.
+test('runCardQueue calls afterCard(card,result) after each card and returns results (dedupe step 1)', async () => {
+  const seen = [];
+  const cards = [{ project: 'a', goal: 'g', branch: 'ghost/a' }, { project: 'b', goal: 'g', branch: 'ghost/b' }];
+  const { results, tripReason } = await runCardQueue(cards, {
+    now: () => 0, governor: null,
+    run: async (card) => ({ project: card.project, outcome: 'shipped', mergeReady: true }),
+    afterCard: async (card, r) => seen.push([card.project, r.mergeReady]),
+  });
+  assert.deepEqual(seen, [['a', true], ['b', true]]);
+  assert.equal(results.length, 2);
+  assert.equal(tripReason, null);
+});
+
+test('runCardQueue stops on interrupted() and skips the rest (dedupe step 1)', async () => {
+  let n = 0;
+  const cards = [{ project: 'a', goal: 'g', branch: 'x' }, { project: 'b', goal: 'g', branch: 'y' }];
+  const { results, tripReason } = await runCardQueue(cards, {
+    now: () => 0, governor: null,
+    run: async (card) => { n++; return { project: card.project, mergeReady: false }; },
+    interrupted: () => n >= 1,
+  });
+  assert.equal(n, 1);
+  assert.equal(tripReason, 'interrupted');
+  assert.equal(results.find(r => r.project === 'b')?.outcome, 'skipped');
+});
+
+test('runCardQueue gates on the governor (pre+post) and skips remaining on a trip (dedupe step 1)', async () => {
+  const cards = [{ project: 'a', goal: 'g', branch: 'x' }, { project: 'b', goal: 'g', branch: 'y' }];
+  let calls = 0;
+  const gov = { check: () => (++calls > 1 ? { ok: false, trip: 'token-budget' } : { ok: true }) };
+  const { results, tripReason } = await runCardQueue(cards, {
+    now: () => 0, governor: gov,
+    run: async (card) => ({ project: card.project, mergeReady: false }),
+  });
+  assert.equal(tripReason, 'token-budget');
+  assert.equal(results.find(r => r.project === 'b')?.outcome, 'skipped');
+});
+
+test('runCardQueue applies depsFor(card) per card and injects the governor (dedupe step 1)', async () => {
+  const seen = [];
+  const gov = { check: () => ({ ok: true }) };
+  await runCardQueue([{ project: 'a', goal: 'g', branch: 'x' }], {
+    now: () => 0, governor: gov,
+    depsFor: (card) => ({ tag: card.project }),
+    run: async (card, d) => { seen.push([d.tag, d.governor === gov]); return { mergeReady: false }; },
+  });
+  assert.deepEqual(seen, [['a', true]]);
 });

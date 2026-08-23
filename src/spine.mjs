@@ -233,42 +233,41 @@ export async function runProposal(card, deps) {
   } catch (e) { return skip(`proposal errored: ${String(e?.message || e).split('\n')[0]}`); }
 }
 
-// ⚠ NOT the production night loop. The daemon reimplements the loop inline in bin/ghost.mjs's `on`
-// case (it needs per-card deps for lineage, an interrupt check, and per-card fetch-back + reapClone
-// that don't fit this single-deps signature). This is a REFERENCE implementation of the core
-// governor-gating + skip-remaining logic, exercised by the loop tests — its green tests do NOT cover
-// the real loop, so a change to the caps/skip logic must be mirrored in bin/ghost.mjs (round 31: the
-// real loop had 5 wiring bugs this never caught). Deduping the two behind one tested core is a
-// worthwhile refactor when there's room to verify it end-to-end.
-export async function runNight(cards, deps) {
+// The ONE per-phase card loop, extracted so both runNight and the daemon's `on` case can share it
+// (docs/night-loop-dedupe-plan.md). It enforces the nightly caps BEFORE and AFTER each card (a trip
+// stops cleanly), stops on interrupt, and reports cards never started as SKIPPED (round 28 #14) — the
+// logic the real loop reimplemented untested. Hooks cover the parts that differ per caller: `run`
+// (runCardSafely for coding, runProposal for proposals), `depsFor(card)` (per-card lineage deps),
+// `interrupted()` (the bin's Ctrl-C flag), and `afterCard(card,result)` (the bin's fetch-back + reap).
+// Fully unit-testable with fakes — no engine/API needed.
+export async function runCardQueue(cards, { now, governor, run = (card, d) => runCardSafely(card, d), depsFor = () => ({}), interrupted = () => false, afterCard = async () => {} } = {}) {
   const results = [];
-  const gov = deps.governor;
-  let tripReason = null;
-  let started = 0;
+  let tripReason = null, started = 0;
   for (const card of cards) {
-    // Enforce the nightly caps BEFORE spending on the next card, and stop cleanly on a trip.
-    if (gov) {
-      const c = gov.check(deps.now());
-      if (!c.ok) { tripReason = c.trip; break; }
-    }
+    if (interrupted()) { tripReason = 'interrupted'; break; }
+    if (governor) { const c = governor.check(now()); if (!c.ok) { tripReason = c.trip; break; } }
     started++;
-    // runCard meters every engine call into the governor itself (Codex H5) — don't
-    // double-count here; just re-check the caps between cards. runCardSafely parks (not aborts)
-    // on a per-card throw so one bad card can't end the night (round 18 #10).
-    const r = await runCardSafely(card, { ...deps, governor: gov });
+    // runCard meters every engine call into the governor itself (Codex H5) — don't double-count here;
+    // just re-check the caps between cards. runCardSafely parks (not aborts) on a per-card throw (round 18 #10).
+    const r = await run(card, { ...depsFor(card), governor });
+    await afterCard(card, r);
     results.push(r);
-    if (gov) {
-      const c = gov.check(deps.now());
-      if (!c.ok) { tripReason = c.trip; break; }
-    }
+    if (governor) { const c = governor.check(now()); if (!c.ok) { tripReason = c.trip; break; } }
   }
-  // Cards never started because the queue stopped (governor trip) are reported as SKIPPED, not
-  // silently dropped from the morning report (round 28 #14).
   for (const c of cards.slice(started)) {
     results.push({ project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false,
       whyLine: `not started — ${tripReason || 'queue stopped'}`, iterations: 0, branch: c.branch,
       testOutput: '', promptsWritten: [], falseDoneCount: 0, ledger: [], tokensUsed: 0, costUsd: 0 });
   }
+  return { results, tripReason, started };
+}
+
+// ⚠ Still NOT the production night loop (the daemon's `on` case remains inline pending the gated
+// step 3 of the dedupe plan). Now a thin wrapper over runCardQueue so its tests exercise the SHARED
+// core — the same loop the bin will adopt — instead of a divergent copy.
+export async function runNight(cards, deps) {
+  const gov = deps.governor;
+  const { results, tripReason } = await runCardQueue(cards, { now: deps.now, governor: gov, depsFor: () => deps });
   return {
     date: new Date(deps.now()).toISOString().slice(0, 10),
     cards: results,
