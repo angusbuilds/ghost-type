@@ -16,7 +16,7 @@ import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reapClone, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
-import { runCardSafely, runProposal } from '../src/spine.mjs';
+import { runCardSafely, runProposal, shipCard } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
@@ -225,22 +225,12 @@ async function main() {
           const lineageFile = path.join(REPORT_DIR, `lineage-${card.project}.jsonl`);
           deps.recordPrompt = (e) => recordLineage(lineageFile, { ...e, ts: new Date().toISOString() });
           const r = await runCardSafely(card, deps);        // per-card boundary: a throw parks, never aborts the night (round 18 #10)
-          if (r.mergeReady) {
-            const cloneName = card.branch.replace(/[^\w.-]/g, '_');
-            try { fetchBranchBack(card.repoPath, path.join(WORK_DIR, cloneName), card.branch, r.commitOid); }
-            // A fetch failure is usually a benign non-ff / ref issue, not tampering — park it with the REAL
-            // error and a correct outcome (was left 'shipped', miscounted by the report), and DON'T reap the
-            // clone: its verified work never reached the source repo, so it's the only copy (round 19 A5).
-            catch (e) { console.error('⚠', e.message); r.mergeReady = false; r.outcome = 'parked'; r.whyLine = `verified but could not fetch the branch back: ${String(e.message).split('\n')[0]}`; }
-            // Reclaim the clone now its verified work is safely in the source repo (round 18 #9) — UNLESS it
-            // held git-ignored state BEFORE acceptance (captured by verifyCard). Such state is absent from the
-            // shipped tree, so a passing test that read it is a possible false pass whose only evidence is the
-            // clone; reaping would destroy it irrecoverably (round 19 A3 / round 20 #3). Preserve for review.
-            if (r.mergeReady) {
-              if (r.hadIgnoredState) console.log(`  ↩ preserving ${cloneName}: had git-ignored state before acceptance (not in the shipped tree)`);
-              else reapClone(cloneName);
-            }
-          }
+          const wasMergeReady = r.mergeReady;
+          // Fetch the verified branch back + reap the clone (or park on fetch-fail, preserve on ignored
+          // state) — the exact round-18/19/20 logic, now the tested shipCard() (round 31 dedupe).
+          shipCard(card, r, { fetchBranchBack, reapClone, workDir: WORK_DIR });
+          if (wasMergeReady && !r.mergeReady) console.error('⚠', r.whyLine);
+          else if (r.mergeReady && r.hadIgnoredState) console.log(`  ↩ preserving ${card.branch.replace(/[^\w.-]/g, '_')}: had git-ignored state before acceptance (not in the shipped tree)`);
           results.push(r);
           const post = gov.check(Date.now());
           if (!post.ok) { tripReason = post.trip; console.log(`\n⏹ stopping: ${post.trip}`); break; }

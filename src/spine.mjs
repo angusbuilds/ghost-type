@@ -1,4 +1,5 @@
 // src/spine.mjs
+import path from 'node:path';
 import { classifyOutcome } from './watcher.mjs';
 import { shieldScan } from './sanitize.mjs';
 import { Ledger } from './ledger.mjs';
@@ -260,6 +261,21 @@ export async function runCardQueue(cards, { now, governor, run = (card, d) => ru
       testOutput: '', promptsWritten: [], falseDoneCount: 0, ledger: [], tokensUsed: 0, costUsd: 0 });
   }
   return { results, tripReason, started };
+}
+
+// The per-card ship the daemon does once a coding card is merge-ready: fetch the verified branch back
+// into the source (OID-pinned), then reap the clone — UNLESS it held git-ignored state before acceptance
+// (that state isn't in the shipped tree, so the clone is the only copy of a possible false pass; preserve
+// it — round 19 A3 / 20 #3). A fetch failure parks with the real error and preserves the clone (its
+// verified work never reached the source — round 19 A5 / 20 #6). Mutates and returns r. Extracted from the
+// bin's inline loop so this critical, previously-untested logic is locked and reusable as an afterCard hook.
+export function shipCard(card, r, { fetchBranchBack, reapClone, workDir }) {
+  if (!r.mergeReady) return r;
+  const cloneName = card.branch.replace(/[^\w.-]/g, '_');
+  try { fetchBranchBack(card.repoPath, path.join(workDir, cloneName), card.branch, r.commitOid); }
+  catch (e) { r.mergeReady = false; r.outcome = 'parked'; r.whyLine = `verified but could not fetch the branch back: ${String(e.message).split('\n')[0]}`; return r; }
+  if (!r.hadIgnoredState) reapClone(cloneName);
+  return r;
 }
 
 // ⚠ Still NOT the production night loop (the daemon's `on` case remains inline pending the gated

@@ -1,7 +1,7 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard, runCardSafely, runNight, runProposal, runCardQueue } from '../src/spine.mjs';
+import { runCard, runCardSafely, runNight, runProposal, runCardQueue, shipCard } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
 
 test('runProposal has the agent write PLAN.md and commits it to the branch, reported as proposed (round 28 #13)', async () => {
@@ -306,4 +306,46 @@ test('runCardQueue applies depsFor(card) per card and injects the governor (dedu
     run: async (card, d) => { seen.push([d.tag, d.governor === gov]); return { mergeReady: false }; },
   });
   assert.deepEqual(seen, [['a', true]]);
+});
+
+// shipCard: the per-card fetch-back + reap the daemon does after a coding card is merge-ready. The
+// night audit confirmed the inline logic correct but it had NO test (integration-only) — lock it, and
+// give step 3 a tested afterCard hook (round 18 #9 / 19 A5 / 20 #3).
+test('shipCard fetches back and reaps the clone on a merge-ready card (round 31 dedupe)', () => {
+  const calls = { fetch: null, reap: null };
+  const r = { mergeReady: true, outcome: 'shipped', commitOid: 'oid1', hadIgnoredState: false };
+  const out = shipCard({ repoPath: '/repo', branch: 'ghost/2026-08-x' }, r, {
+    fetchBranchBack: (repo, clone, branch, oid) => { calls.fetch = [repo, clone, branch, oid]; },
+    reapClone: (name) => { calls.reap = name; }, workDir: '/work',
+  });
+  assert.equal(out.mergeReady, true);
+  assert.deepEqual(calls.fetch, ['/repo', '/work/ghost_2026-08-x', 'ghost/2026-08-x', 'oid1']);   // OID-pinned, sanitized clone name
+  assert.equal(calls.reap, 'ghost_2026-08-x');   // reaped once safely in the source
+});
+
+test('shipCard PRESERVES a clone that had git-ignored state before acceptance (round 31 dedupe)', () => {
+  let reaped = null;
+  const r = { mergeReady: true, commitOid: 'oid', hadIgnoredState: true };
+  shipCard({ repoPath: '/r', branch: 'ghost/y' }, r, { fetchBranchBack: () => {}, reapClone: (n) => { reaped = n; }, workDir: '/w' });
+  assert.equal(reaped, null);   // NOT reaped — the clone is the only copy of possibly-false-pass state
+});
+
+test('shipCard on a fetch failure parks (not shipped) and PRESERVES the clone (round 31 dedupe)', () => {
+  let reaped = null;
+  const r = { mergeReady: true, outcome: 'shipped', commitOid: 'oid', hadIgnoredState: false };
+  const out = shipCard({ repoPath: '/r', branch: 'ghost/z' }, r, {
+    fetchBranchBack: () => { throw new Error('non-fast-forward\nmore'); }, reapClone: (n) => { reaped = n; }, workDir: '/w',
+  });
+  assert.equal(out.mergeReady, false);
+  assert.equal(out.outcome, 'parked');
+  assert.match(out.whyLine, /could not fetch the branch back: non-fast-forward/);
+  assert.equal(reaped, null);   // verified work never reached source → preserve the only copy
+});
+
+test('shipCard is a no-op for a non-merge-ready card (round 31 dedupe)', () => {
+  let touched = false;
+  const r = { mergeReady: false, outcome: 'parked' };
+  const out = shipCard({ repoPath: '/r', branch: 'ghost/w' }, r, { fetchBranchBack: () => { touched = true; }, reapClone: () => { touched = true; }, workDir: '/w' });
+  assert.equal(touched, false);
+  assert.equal(out, r);
 });
