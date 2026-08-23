@@ -105,24 +105,23 @@ test('reap refuses a SYMLINKED work root outright — deletes nothing (round 4: 
   fs.rmSync(base, { recursive: true, force: true });
 });
 
-// realQuarantineBacklog surfaces the preserved `.crashed-*` clones (round 30 audit fixes).
-test('realQuarantineBacklog counts ONLY exact-suffix quarantine directories', () => {
+// realQuarantineBacklog surfaces EVERY leftover clone (parked + crashed) — reap/reconcile preserve
+// both forever, so both are disk backlog doctor must show (round 32 audit — was crash-only).
+test('realQuarantineBacklog counts every leftover clone DIRECTORY (parked + crashed), ignoring files', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-qb-'));
-  fs.mkdirSync(path.join(base, 'ghost_x.crashed-1787000000000-abc123'));   // current format (with hex) → counts
-  fs.mkdirSync(path.join(base, 'ghost_y.crashed-1787000000002'));          // OLD format (no hex) → still counts
-  fs.mkdirSync(path.join(base, 'foo.crashed-notavalidsuffix'));            // wrong suffix shape → ignored
-  fs.mkdirSync(path.join(base, 'ghost_active'));                          // an ordinary clone → ignored
-  fs.writeFileSync(path.join(base, 'y.crashed-1787000000001-def456'), '');// a FILE, not a dir → ignored
+  fs.mkdirSync(path.join(base, 'ghost_x.crashed-1787000000000-abc123'));   // crashed → counts
+  fs.mkdirSync(path.join(base, 'ghost_2026-08-22-acme-add-feature'));      // a PARKED clone → NOW counts (was invisible)
+  fs.mkdirSync(path.join(base, 'ghost_active'));                          // any leftover clone → counts
+  fs.writeFileSync(path.join(base, 'stray.txt'), '');                     // a FILE, not a dir → ignored
   const q = realQuarantineBacklog(base);
-  assert.equal(q.count, 2);                        // both quarantine dirs, across naming eras
-  assert.ok(Number.isFinite(q.sizeMB) && q.sizeMB >= 0);   // size is a real number, never a crash
+  assert.equal(q.count, 3);                                              // all three dirs; the file ignored
+  assert.ok(Number.isFinite(q.sizeMB) && q.sizeMB >= 0);
   fs.rmSync(base, { recursive: true, force: true });
 });
 
-test('realQuarantineBacklog reports a clean work dir as count 0', () => {
+test('realQuarantineBacklog reports a truly-empty work dir as count 0', () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-qb0-'));
-  fs.mkdirSync(path.join(base, 'ghost_active'));
-  assert.deepEqual(realQuarantineBacklog(base), { count: 0, sizeMB: 0 });
+  assert.deepEqual(realQuarantineBacklog(base), { count: 0, sizeMB: 0 });   // nothing to reclaim
   fs.rmSync(base, { recursive: true, force: true });
 });
 

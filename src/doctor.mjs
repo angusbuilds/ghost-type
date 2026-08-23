@@ -29,8 +29,8 @@ export function checkEnv({ has, claudeVersion, onBattery, freeDiskGB, dcgPresent
     const detail = q == null
       ? 'could not read the work dir'
       : q.count === 0
-        ? 'no crashed clones held'
-        : `${q.count} crashed clone${q.count === 1 ? '' : 's'} preserved${q.sizeMB != null ? ` (~${q.sizeMB}MB)` : ''} — review, then clear to reclaim disk`;
+        ? 'no leftover clones held'
+        : `${q.count} leftover clone${q.count === 1 ? '' : 's'} preserved${q.sizeMB != null ? ` (~${q.sizeMB}MB)` : ''} — review, then clear to reclaim disk`;
     req('quarantine', q != null && q.count === 0, detail, false);
   }
 

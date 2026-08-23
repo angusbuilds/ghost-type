@@ -59,3 +59,16 @@ test('tmuxTintPane/tmuxResetPane actually set and clear a real pane background',
     try { tmux('kill-session', '-t', session); } catch { /* best effort */ }
   }
 });
+
+test('tmuxTintPane/tmuxResetPane suppress tmux stderr on a dead pane — no leak to the process (round 32 audit)', { skip: tmuxAvailable() ? false : 'tmux not on PATH' }, () => {
+  // The leak is a direct fd-2 write from the tmux child (execFileSync inherits stderr by default), so
+  // it can only be observed from a subprocess. A child that tints a non-existent pane must produce NO
+  // tmux error on its stderr — the callers silently catch the throw, and the Swift app reads non-empty
+  // stderr as a false failure.
+  const modUrl = new URL('../src/tint.mjs', import.meta.url).href;
+  const code = `import('${modUrl}').then(m => { try { m.tmuxTintPane('%99999999') } catch {} try { m.tmuxResetPane('%99999999') } catch {} })`;
+  let stderr = '';
+  try { execFileSync(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' }); }
+  catch (e) { stderr = e.stderr || ''; }
+  assert.doesNotMatch(stderr, /no server running|can't find pane|no current client|usage:/i);
+});

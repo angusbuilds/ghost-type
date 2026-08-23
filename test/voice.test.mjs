@@ -64,6 +64,11 @@ test('a FAILED ghost learn does not overwrite a good voice profile with the erro
   const kept = fs.readFileSync(path.join(out, 'voice-profile.md'), 'utf8');
   assert.match(kept, /the good learned voice/);        // the good profile survived
   assert.doesNotMatch(kept, /ENOTFOUND/);              // the error text was NOT persisted
+  // ...but the exemplar bank is engine-independent, so it IS persisted even on a failed distillation
+  // — it was being discarded with the profile (round 32 audit).
+  assert.ok(fs.existsSync(res.exemplarPath), 'exemplars persisted despite the distillation failure');
+  assert.ok(JSON.parse(fs.readFileSync(res.exemplarPath, 'utf8')));   // valid JSON bank, not error text
+  assert.match(res.skipped, /exemplars refreshed/);
   fs.rmSync(out, { recursive: true, force: true }); fs.rmSync(dir, { recursive: true, force: true });
 });
 

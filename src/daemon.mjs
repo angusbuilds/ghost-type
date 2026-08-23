@@ -48,11 +48,12 @@ export function realQuarantineBacklog(dir = WORK_DIR) {
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
   catch { return null; }   // unreadable → unknown, NOT clean
-  // Match the end-anchored quarantine suffix on real directories: `.crashed-<ms>` with an OPTIONAL
-  // `-<6 hex>` (current clone.mjs appends the hex; older versions did not — both are real crashed
-  // clones). This excludes a like-named file or a legit clone that merely contains the substring,
-  // without hiding old-format quarantines (round 30 audit #2, refined to cover both naming eras).
-  const names = entries.filter(e => e.isDirectory() && /\.crashed-\d+(-[0-9a-f]{6})?$/.test(e.name)).map(e => e.name);
+  // Count EVERY leftover clone directory, not just `.crashed-*` — reap()/reconcile() also preserve
+  // PARKED clones forever (a card that hits maxIterations / a governor trip / a rate-limit is the common
+  // case, and shipCard doesn't reap a non-merge-ready clone). doctor runs disarmed, so any clone dir here
+  // is backlog by definition; counting only crashes left the parked backlog invisible until the disk
+  // arm-check silently refused to run (round 32 audit — the earlier round-30 crash-only match was too narrow).
+  const names = entries.filter(e => e.isDirectory()).map(e => e.name);
   if (names.length === 0) return { count: 0, sizeMB: 0 };
   const paths = names.map(n => path.join(dir, n));
   let sizeMB = null;

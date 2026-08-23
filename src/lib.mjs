@@ -63,7 +63,12 @@ export function log(entry) {
 // #3). Its text must NEVER be reused as a next-prompt, candidate, plan, diagnosis, or voice profile;
 // an exitCode-only check leaks the limit message into all of those (round 28 #3-variant, systematized).
 export function engineFailed(r) {
-  return Boolean(r && ((r.exitCode != null && r.exitCode !== 0) || r.result?.is_error === true));
+  // A result is a clean success ONLY if subtype==='success' with no is_error (matching watcher's
+  // classifyOutcome). A structured result whose subtype is present but NOT 'success' (e.g. 'error',
+  // 'error_max_turns') is a failure even with exit 0 and no is_error flag — the shape the CLIs actually
+  // emit for a rate/usage limit, which must never leak into a next-prompt/plan/voice (round 32 audit).
+  return Boolean(r && ((r.exitCode != null && r.exitCode !== 0) || r.result?.is_error === true
+    || (r.result?.subtype != null && r.result.subtype !== 'success')));
 }
 
 // Truncate to a byte ceiling, appending a visible marker when cut.

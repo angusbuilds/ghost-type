@@ -104,13 +104,16 @@ export async function learn({ projectsDir, engine, sampleN = 200, perTag = 5, ou
   fs.mkdirSync(outDir, { recursive: true });
   const profilePath = path.join(outDir, 'voice-profile.md');
   const exemplarPath = path.join(outDir, 'exemplars.json');
-  // A failed/empty distillation must NOT overwrite a good existing profile (or exemplars) with an
-  // error string — a failed `ghost learn` is a no-op that keeps the last good voice (round 28 #11).
-  if (!profile) return { totalPrompts: all.length, sampled: sample.length, profilePath, exemplarPath, bank, skipped: 'distillation failed — kept existing voice' };
+  // The exemplar bank is built purely from local transcripts (buildExemplarBank — engine-independent),
+  // so persist it REGARDLESS of whether distillation succeeded. It was being discarded along with a
+  // failed profile, so a `ghost learn` that hit a usage limit refreshed nothing (round 32 audit).
+  fs.writeFileSync(exemplarPath, JSON.stringify(bank, null, 2));
+  // A failed/empty distillation must NOT overwrite a good existing PROFILE with an error string —
+  // that path keeps the last good voice profile (round 28 #11). Only the profile is gated on success.
+  if (!profile) return { totalPrompts: all.length, sampled: sample.length, profilePath, exemplarPath, bank, skipped: 'distillation failed — kept existing voice profile (exemplars refreshed)' };
   // Cap the distilled profile before it's persisted — a runaway model response would otherwise
   // be stored uncapped and re-injected into every future prompt (round 5 review #7).
   fs.writeFileSync(profilePath, byteCap(profile, PROFILE_CAP) + '\n');
-  fs.writeFileSync(exemplarPath, JSON.stringify(bank, null, 2));
 
   return { totalPrompts: all.length, sampled: sample.length, profilePath, exemplarPath, bank };
 }

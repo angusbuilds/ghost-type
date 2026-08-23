@@ -31,12 +31,15 @@ export function inTmux(env = process.env) {
 }
 
 // Tint a specific tmux pane (e.g. "%3" or "session:win.pane"). Only that pane glows.
+// stdio suppressed so a failed call (closed pane / dead tmux server — routine when the driven
+// terminal is closed while haunted) doesn't leak tmux's "no server running" to the CLI's stderr,
+// which the callers silently catch and the Swift app reads as a false failure signal (round 32 audit).
 export function tmuxTintPane(target, color = GHOST_PURPLE_256) {
-  execFileSync('tmux', ['select-pane', '-t', target, '-P', `bg=${color}`]);
+  execFileSync('tmux', ['select-pane', '-t', target, '-P', `bg=${color}`], { stdio: ['ignore', 'ignore', 'ignore'] });
 }
 
 export function tmuxResetPane(target) {
-  execFileSync('tmux', ['select-pane', '-t', target, '-P', 'default']);
+  execFileSync('tmux', ['select-pane', '-t', target, '-P', 'default'], { stdio: ['ignore', 'ignore', 'ignore'] });
 }
 
 // Convenience for the current (non-tmux) terminal: write straight to a stream.

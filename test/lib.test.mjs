@@ -1,7 +1,7 @@
 // test/lib.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byteCap, WORK_DIR, STATE_DIR, readJson, writeJson } from '../src/lib.mjs';
+import { byteCap, WORK_DIR, STATE_DIR, readJson, writeJson, engineFailed } from '../src/lib.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,4 +47,16 @@ test('byteCap truncates and marks long text', () => {
 test('paths live under ~/.ghosttype', () => {
   assert.match(STATE_DIR, /\.ghosttype$/);
   assert.match(WORK_DIR, /\.ghosttype\/work$/);
+});
+
+test('engineFailed flags every failure shape but not a clean success (round 32 parallel-audit HIGH)', () => {
+  // clean success → NOT failed
+  assert.equal(engineFailed({ exitCode: 0, result: { subtype: 'success', is_error: false } }), false);
+  assert.equal(engineFailed({ exitCode: 0, result: null, text: 'ok' }), false);   // no result event (bare text) is fine
+  // failures → flagged
+  assert.equal(engineFailed({ exitCode: 1, result: null }), true);                              // transport/crash
+  assert.equal(engineFailed({ exitCode: 0, result: { subtype: 'success', is_error: true } }), true);  // Claude limit shape (round 28)
+  assert.equal(engineFailed({ exitCode: 0, result: { subtype: 'error', result: 'usage limit reached' } }), true);   // fake-claude rate-limit shape: subtype!=='success', no is_error
+  assert.equal(engineFailed({ exitCode: 0, result: { subtype: 'error_max_turns' } }), true);    // Claude error subtypes
+  assert.equal(engineFailed(null), false);
 });

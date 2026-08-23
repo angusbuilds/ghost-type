@@ -45,7 +45,9 @@ export function makeClone(repoPath, taskId) {
   validateClonePath(clonePath);
   // Reject a source that overlaps the work dir — canonicalized so a symlink alias to the
   // work dir can't slip past a lexical check and let the source be deleted (Codex re-audit #4).
-  const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  // .native (not the JS realpathSync) canonicalizes CASE too, so a case-flipped alias of WORK_DIR
+  // on the default case-insensitive macOS filesystem can't bypass the overlap check (round 32 audit).
+  const realOr = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
   const src = realOr(path.resolve(repoPath)) + path.sep;
   const work = realOr(WORK_DIR) + path.sep;
   if (src.startsWith(work) || work.startsWith(src)) throw new Error(`clone source overlaps the work dir: ${repoPath}`);

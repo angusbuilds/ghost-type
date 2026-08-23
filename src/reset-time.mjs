@@ -12,8 +12,14 @@ const DURATION = /(\d+)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|s
 const CLOCK = /\bat\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?/;
 
 export function parseResetTime(text, nowMs) {
-  const s = String(text).toLowerCase();
-  if (!TRIGGER.test(s)) return null;
+  const full = String(text).toLowerCase();
+  const trig = full.search(TRIGGER);
+  if (trig < 0) return null;
+  // Parse ONLY the window at/after the trigger — the reset time follows the phrase ("limit reached,
+  // try again in 30m" / "resets at 6 PM"). Scanning the whole text summed unrelated durations
+  // ("spent 45m debugging … in 30m" → 75m) and grabbed the wrong clock ("at 9:15 … resets at 6 PM"
+  // → 9:15) since assistantText concatenates a whole session's prose (round 32 audit).
+  const s = full.slice(trig, trig + 80);
 
   // 1. Relative durations: "resets in 2h 30m", "try again in 45 minutes".
   let totalMs = 0;
