@@ -61,3 +61,25 @@ test('both profiles are a NO-OP off macOS — argv passes through unwrapped', ()
   assert.equal(sandboxWriteConfine(argv, '/c', { platform: 'darwin' })[0], 'sandbox-exec');
   assert.equal(sandboxNetDeny(argv, { platform: 'darwin' })[0], 'sandbox-exec');
 });
+
+test('sandboxWriteConfine DENIES the agent binaries + hooks/settings/config, ALLOWS package caches (round 32 parallel-audit CRITICAL)', { skip }, () => {
+  // The confined session is for an UNTRUSTED repo. The broad allows (for deps bootstrap) accidentally
+  // let it rewrite the tooling that runs the NEXT session — the agent binaries and the hooks/settings/
+  // config — a sandbox escape. It must still be able to write package-manager caches.
+  const base = fs.mkdtempSync('/private/tmp/gt-sbesc-');
+  const home = path.join(base, 'home'), clone = path.join(base, 'clone');
+  for (const d of ['.local/bin', '.claude/hooks', '.codex', '.npm', '.cache']) fs.mkdirSync(path.join(home, d), { recursive: true });
+  fs.mkdirSync(clone);
+  const write = (p) => runs(sandboxWriteConfine(['/usr/bin/touch', p], clone, { home }));
+  try {
+    // DENIED — the tooling that executes the next session
+    assert.equal(write(path.join(home, '.local/bin/claude')), false, 'agent binary must be write-protected');
+    assert.equal(write(path.join(home, '.claude/hooks/evil.sh')), false, '~/.claude/hooks (dcg/guard) must be write-protected');
+    assert.equal(write(path.join(home, '.claude/settings.json')), false, '~/.claude/settings.json must be write-protected');
+    assert.equal(write(path.join(home, '.codex/config.toml')), false, '~/.codex/config.toml must be write-protected');
+    // ALLOWED — deps bootstrap must still work
+    assert.equal(write(path.join(home, '.npm/x')), true, 'package cache must stay writable');
+    assert.equal(write(path.join(home, '.cache/y')), true, 'cache must stay writable');
+    assert.equal(write(path.join(clone, 'work.txt')), true, 'the clone must stay writable');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
