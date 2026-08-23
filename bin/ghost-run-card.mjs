@@ -6,7 +6,7 @@ import { runCardSafely } from '../src/spine.mjs';
 import { makeClone, fetchBranchBack, commitTreeRef } from '../src/clone.mjs';
 import { runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
-import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
+import { verifyCard, patchApplied, classifyClaim, sterileTree } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
@@ -27,6 +27,9 @@ const deps = {
   makeClone,
   headRef: (clonePath) => git(clonePath, 'rev-parse', 'HEAD').trim(),
   patchApplied,
+  // Per-iteration patch detection (same sterile hash the verifier ships from); null on probe failure →
+  // guard reads "changed" → runs verify, never a false fast-park (round 33).
+  treeHashOf: (clonePath) => { try { return sterileTree(clonePath); } catch { return null; } },
   // Dispatch by the CARD's engine (round 6 #7 — was hardwired to Claude, so a Codex card ran
   // Claude with OpenAI creds). Writer calls (diagnosis/candidates/vote) run read-only,
   // tiny-budget; coding calls get the shaped prompt + full tool set.

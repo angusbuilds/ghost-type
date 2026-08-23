@@ -1,7 +1,7 @@
 // src/spine.mjs
 import path from 'node:path';
 import { classifyOutcome } from './watcher.mjs';
-import { shieldScan } from './sanitize.mjs';
+import { shieldScan, scrubSecrets } from './sanitize.mjs';
 import { Ledger } from './ledger.mjs';
 import { log, byteCap, engineFailed } from './lib.mjs';
 import { DEFAULT_CALL_TIMEOUT_MS } from './engine.mjs';
@@ -20,6 +20,8 @@ export async function runCard(card, deps) {
     // M1 capabilities — defaulted to M0-equivalent behavior:
     headRef = () => 'HEAD',
     patchApplied = () => true,
+    treeHashOf = null,                       // per-iteration tree-hash probe (real: verifier.sterileTree); null → use patchApplied fallback
+
     classifyClaim = () => ({ claimedDone: false, falseDone: false }),
     diagnoseFailure = async () => '',
     generateCandidates = async () => [],
@@ -31,6 +33,11 @@ export async function runCard(card, deps) {
 
   const clonePath = makeClone(card.repoPath, card.branch.replace(/[^\w.-]/g, '_'));
   const baseRef = headRef(clonePath);
+  // Per-iteration patch-applied baseline: the tree hash at the START of the current iteration (the clone
+  // state for iter 1, then each iteration's post-engine hash). Diffing the fixed card-lifetime baseRef
+  // read "patch applied" for every no-op iteration after the first real edit, burning a full verify on an
+  // unchanged tree (round 33). null when no probe is injected (M0 / offline tests) → old baseRef behavior.
+  let iterBaseHash = treeHashOf ? treeHashOf(clonePath) : null;
   const ledger = new Ledger();
   const promptsWritten = [];
   let prompt = card.goal;
@@ -134,10 +141,18 @@ export async function runCard(card, deps) {
       continue;
     }
     netBackoffs = 0;               // a real attempt happened — reset the transient-failure counter
+    rateWaits = 0;                 // ...and the rate-limit breaker: it measures CONSECUTIVE throttling, not a
+                                   // lifetime count, else a progressing card parks after 7 scattered hits (round 33)
     governor?.noteOk();            // a real engine RESPONSE resets the consecutive-ENGINE-error breaker (round 28 #6)
 
-    // PATCH-APPLIED GUARD — before spending a test cycle, confirm the tree actually changed.
-    if (!patchApplied(clonePath, baseRef)) {
+    // PATCH-APPLIED GUARD — before spending a test cycle, confirm THIS iteration changed the tree.
+    // Compare the current tree hash to the hash at the start of this iteration (not the stale card-lifetime
+    // baseRef). A null/failed probe reads as "changed" → run verify (the conservative direction, never a
+    // false fast-park of real work). Falls back to the baseRef diff when no probe is injected (round 33).
+    let curHash = null, applied;
+    if (treeHashOf) { curHash = treeHashOf(clonePath); applied = curHash !== iterBaseHash; }
+    else { applied = patchApplied(clonePath, baseRef); }
+    if (!applied) {
       lastTestOutput = 'no patch applied — the working tree did not change';
       const claim = classifyClaim({ claimText: eng.text, verifyPass: false });
       if (claim.falseDone) { falseDoneCount += 1; log({ evt: 'false-done', project: card.project, iteration: iterations, why: 'claimed done, no patch' }); }
@@ -147,6 +162,7 @@ export async function runCard(card, deps) {
       catch (e) { if (e.message === 'SHIELD_HIT') return { ...park(card, 'shield hit — injection signal in session output', iterations, lastTestOutput, promptsWritten, e.patterns, falseDoneCount, ledger), tokensUsed, costUsd }; if (e.message === 'GOVERNOR_TRIP') return { ...park(card, `governor: ${e.trip}`, iterations, lastTestOutput, promptsWritten, undefined, falseDoneCount, ledger), tokensUsed, costUsd }; throw e; }
       continue;
     }
+    if (treeHashOf) iterBaseHash = curHash;   // a real patch landed — the next iteration measures change from HERE
 
     // VERIFY — run the acceptance test ourselves; ground the agent's claim against it.
     // baseRef lets verify see committed changes too, not just the uncommitted tree. If the
@@ -224,8 +240,14 @@ export async function runProposal(card, deps) {
       prompt: `Propose a concrete, step-by-step plan to accomplish this task in this repository. Read whatever you need, but make NO changes; output ONLY a markdown plan, no preamble.\n\nTASK: ${card.goal}`,
       maxBudgetUsd: Number.isFinite(rem$) ? Math.min(1, rem$) : 1 });
     if (governor) { if (r?.usage) governor.addUsage(r.usage); const cost = r?.costUsd ?? r?.result?.total_cost_usd; if (cost) governor.addCost(cost); }
-    const plan = (r?.text || '').trim();
+    // The read-only agent was told to "read whatever you need" over the whole repo, and this plan is
+    // committed then fetched back into the REAL source repo (PLAN.md, read by the owner's own higher-
+    // privilege interactive session). It is repo-derived untrusted text like every other engine output —
+    // scrub secrets and shield-gate it, the one path that previously did neither (round 33 HIGH).
+    const plan = scrubSecrets((r?.text || '').trim());
     if (!plan || engineFailed(r)) return skip('proposal engine call failed — no plan produced');   // incl. a structured is_error limit (round 28 #3-variant)
+    const scan = shieldScan(plan);
+    if (scan.hit) return skip('shield hit — injection signal in proposed plan');
     writePlan(clonePath, `# Plan — ${card.goal}\n\n${plan}\n`);
     const commitOid = commit(clonePath, card.branch, {});   // non-tree path: adds PLAN.md + commits
     return { project: card.project, goal: card.goal, outcome: 'proposed', mergeReady: false,

@@ -19,7 +19,7 @@ import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, re
 import { runCardSafely, runProposal, shipCard, shipProposal } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
-import { verifyCard, patchApplied, classifyClaim } from '../src/verifier.mjs';
+import { verifyCard, patchApplied, classifyClaim, sterileTree } from '../src/verifier.mjs';
 import { writeNextPrompt, diagnoseFailure } from '../src/prompt-writer.mjs';
 import { generateCandidates, voteBest } from '../src/preflight.mjs';
 import { buildSessionEnv, allowedToolsFor } from '../src/env.mjs';
@@ -96,6 +96,9 @@ function cardDeps(card, voice) {
     makeClone,
     headRef: (clonePath) => git(clonePath, 'rev-parse', 'HEAD').trim(),
     patchApplied,
+    // Per-iteration patch detection uses the same sterile disk-hash the verifier ships from; a probe
+    // failure returns null → the guard reads "changed" and runs verify (never a false fast-park) (round 33).
+    treeHashOf: (clonePath) => { try { return sterileTree(clonePath); } catch { return null; } },
     runEngine: realEngine(card),
     commit: (clonePath, branch, { tree, baseRef } = {}) => {
       git(clonePath, 'config', 'user.email', 'ghost@ghosttype.local');
