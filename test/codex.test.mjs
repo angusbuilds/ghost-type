@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { parseCodexStream, runCodex, runAgent, codexArgs } from '../src/engine.mjs';
 import { classifyOutcome } from '../src/watcher.mjs';
+import { usageTokens } from '../src/governor.mjs';
 
 test('a Codex turn.failed usage limit is a STRUCTURED error → classified rate-limited, not generic errored (round 28 #4)', async () => {
   const FAKE0 = path.resolve('test/fake-codex.mjs');
@@ -99,4 +100,14 @@ test('a stall (turn.completed but did not fix it) IS a completed turn → succes
 test('runAgent dispatches to codex when engine=codex', async () => {
   const r = await runAgent({ engine: 'codex', cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'success' }, bin: FAKE });
   assert.equal(r.result.subtype, 'success');
+});
+
+test('runCodex counts cached + cache-write + reasoning tokens so the governor meters a Codex night (round 33 HIGH)', async () => {
+  // The token cap is the ONLY spend backstop for Codex (no dollar cap). runCodex was mapping only
+  // input_tokens+output_tokens, dropping cached_input/cache_write/reasoning — a ~789x undercount that
+  // let a cache-heavy Codex night run effectively unmetered, bounded only by the 07:00 wall clock.
+  const FAKE = path.resolve('test/fake-codex.mjs');
+  const r = await runCodex({ cwd: process.cwd(), prompt: 'x', env: { ...process.env, GHOST_FAKE_SCENARIO: 'cache-heavy' }, bin: FAKE });
+  // usageTokens sums input + output + cache_creation + cache_read; reasoning folds into output.
+  assert.equal(usageTokens(r.usage), 200 + (50 + 12000) + 5000 + 180000);   // 197250, not the old 250
 });

@@ -217,9 +217,15 @@ export function runCodex({ cwd, prompt, sandbox = 'workspace-write', model, env,
         result: ok ? { subtype: 'success', result: text || 'codex turn completed' }
               : structuredFail ? { subtype: 'error', is_error: true, result: text || p.errorMsg || 'codex turn failed' }
               : null,
+        // Map codex 0.148's native usage fields into the four buckets governor.usageTokens() sums —
+        // dropping cached_input/cache_write/reasoning undercounted a cache-heavy turn ~789x, and the
+        // token cap is the ONLY spend backstop for Codex (no dollar cap), so a Codex night ran
+        // effectively unmetered on tokens (round 33 HIGH). Reasoning folds into output_tokens.
         usage: p.tokens ? {
           input_tokens: p.tokens.input_tokens ?? p.tokens.input ?? 0,
-          output_tokens: p.tokens.output_tokens ?? p.tokens.output ?? 0,
+          output_tokens: (p.tokens.output_tokens ?? p.tokens.output ?? 0) + (p.tokens.reasoning_output_tokens ?? 0),
+          cache_creation_input_tokens: p.tokens.cache_write_input_tokens ?? 0,
+          cache_read_input_tokens: p.tokens.cached_input_tokens ?? 0,
         } : null,
         text,
         raw: out.get(),

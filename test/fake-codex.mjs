@@ -21,6 +21,12 @@ if (scenario === 'success') {
 } else if (scenario === 'crash') {
   process.stderr.write('codex: fatal error\n');
   process.exit(1);
+} else if (scenario === 'cache-heavy') {
+  // a real cache/reasoning-heavy turn (codex 0.148 fields) — the governor must count ALL buckets,
+  // not just input+output, or a Codex night runs effectively unmetered on tokens (round 33).
+  line({ type: 'item.completed', item: { id: 'i0', type: 'agent_message', text: 'done, reused the cached context' } });
+  line({ type: 'turn.completed', usage: { input_tokens: 200, cached_input_tokens: 180000, cache_write_input_tokens: 5000, output_tokens: 50, reasoning_output_tokens: 12000 } });
+  process.exit(0);
 } else if (scenario === 'usage-limit') {
   // a STRUCTURED provider failure — a usage limit — as turn.failed + nonzero exit (round 28 #4).
   // Emit SOME assistant text first, then fail: the error message must still win for classification,
