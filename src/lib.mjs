@@ -51,6 +51,28 @@ export function writeJson(file, value) {
   }
 }
 
+// Best-effort exclusive lock for the rare cross-PROCESS read-modify-write on a shared file — two
+// `ghost haunt` CLI invocations racing on haunted.json each read-then-write the whole list, so the
+// second writer clobbers the first (round 35). O_EXCL create is the lock; spin briefly; on timeout
+// PROCEED anyway — the guarded state is non-critical UI bookkeeping, so a rare lost update beats a hung
+// command. A lock older than the whole spin budget is reclaimed so a crashed holder can't wedge it
+// forever. writeJson already makes each individual write atomic; this serializes the RMW around it.
+export function withFileLock(target, fn, { attempts = 40, waitMs = 15 } = {}) {
+  const lock = `${target}.lock`;
+  try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch { /* dir exists */ }
+  const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no SAB */ } };
+  let held = false;
+  for (let i = 0; i < attempts; i++) {
+    try { fs.closeSync(fs.openSync(lock, 'wx')); held = true; break; }   // wx = O_CREAT|O_EXCL — fails if held
+    catch {
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > attempts * waitMs) fs.rmSync(lock, { force: true }); } catch { /* gone/raced */ }
+      sleep(waitMs);
+    }
+  }
+  try { return fn(); }
+  finally { if (held) { try { fs.rmSync(lock, { force: true }); } catch { /* best effort */ } } }
+}
+
 export function log(entry) {
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });

@@ -95,3 +95,16 @@ test('a truncated trailing line does not discard the whole lineage (round 5 #3)'
   assert.equal(entries.length, 1);              // the valid row survives...
   assert.equal(entries[0].prompt, 'good row');  // ...instead of the whole file being dropped
 });
+
+test('recordLineage byteCaps the prompt and bounds the file so a runaway prompt / long-lived project cannot grow it without limit (round 35)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lineage-'));
+  const file = path.join(dir, 'lineage-p.jsonl');
+  recordLineage(file, { iteration: 1, prompt: 'x'.repeat(1_000_000), outcome: 'no-patch' });   // runaway prompt
+  const firstLine = fs.readFileSync(file, 'utf8').split('\n')[0];
+  assert.ok(Buffer.byteLength(firstLine) < 5000, `entry bounded: ${Buffer.byteLength(firstLine)} bytes`);
+  for (let i = 0; i < 6000; i++) recordLineage(file, { iteration: i, prompt: 'a moderately sized next prompt '.repeat(20), outcome: 'fail' });
+  assert.ok(fs.statSync(file).size < 2_000_000, `file bounded by rotation: ${fs.statSync(file).size} bytes`);
+  const rows = readLineage(file);   // still valid JSONL after rotation
+  assert.ok(rows.length > 0 && rows.every(r => typeof r.iteration === 'number'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});

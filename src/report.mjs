@@ -1,12 +1,15 @@
 // src/report.mjs
 // Markdown-first (spec: HTML wrapper is later). Status strip in columns first,
 // then collapsible per-card detail — respects "show, don't wall-of-prose".
+import { byteCap } from './lib.mjs';
 
 // Untrusted fields (goal, whyLine, test output) reach this renderer verbatim. Neutralize the
 // two ways they can break structure: a `|` or newline shattering a table row, and an embedded
-// ``` closing a code fence early (round 4 #10).
-const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-const fenceSafe = (s) => String(s ?? '').replace(/```/g, '` ` `');
+// ``` closing a code fence early (round 4 #10). And BOUND the length — every other untrusted-text
+// sink byte-caps, but this one didn't, so a 2MB field produced an ~8MB terminal dump / latest.md
+// (round 35). A cell is a one-line summary; test output gets a larger budget.
+const cell = (s) => byteCap(String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' '), 800);
+const fenceSafe = (s) => byteCap(String(s ?? '').replace(/```/g, '` ` `'), 8000);
 
 export function renderReport(night) {
   const strip = [

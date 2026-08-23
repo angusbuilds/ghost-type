@@ -46,3 +46,20 @@ test('tint failure does not throw (pane may be gone)', () => {
   assert.doesNotThrow(() => haunt('%9', { file, tint: () => { throw new Error('no pane'); } }));
   assert.equal(isHaunted('%9', file), true);   // state still recorded
 });
+
+test('haunt() serializes the cross-process read-modify-write so two concurrent invocations do not clobber each other (round 35)', async () => {
+  const { spawn } = await import('node:child_process');
+  const file = tmpFile();
+  const mod = new URL('../src/haunt.mjs', import.meta.url).href;
+  const spawnHaunt = (pane) => new Promise((resolve) => {
+    const code = `import(${JSON.stringify(mod)}).then(m => m.haunt(${JSON.stringify(pane)}, { file: ${JSON.stringify(file)}, tint: () => {} }))`;
+    spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: 'ignore' }).on('exit', () => resolve());
+  });
+  // Before the lock the finder saw 40/40 clobbers (final list length 1). With it, both survive every trial.
+  for (let t = 0; t < 4; t++) {
+    fs.writeFileSync(file, '[]');
+    await Promise.all([spawnHaunt(`%A${t}`), spawnHaunt(`%B${t}`)]);
+    const list = readHaunted(file);
+    assert.ok(list.includes(`%A${t}`) && list.includes(`%B${t}`), `both panes survived trial ${t}: ${JSON.stringify(list)}`);
+  }
+});

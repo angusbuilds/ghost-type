@@ -4,10 +4,16 @@
 // Claude Code handles a loose high-level directive; Codex is literal and step-driven, so it
 // gets an explicit ordered tail (files in scope → command to run → concrete stop condition).
 export function shapeForEngine(prompt, engine = 'claude', card = {}) {
-  if (engine !== 'codex') return prompt;
+  // A blank next-prompt (prompt-writer returns '' on a successful-but-empty writer call, round 28
+  // #3-variant) would otherwise be dressed up as a fully-formed but GOAL-LESS instruction — for codex an
+  // ordered "make the changes / run the test / stop at exit 0" with nothing to actually do, burning an
+  // iteration + budget on a directionless run. Fall back to the card's goal, matching writeNextPrompt's
+  // own engineFailed→goal path; a real prompt is passed through unchanged (round 35).
+  const base = String(prompt ?? '').trim() === '' ? String(card.goal ?? '') : prompt;
+  if (engine !== 'codex') return base;
   const testCmd = (card.acceptanceArgv || []).join(' ') || 'the test command';
   return [
-    prompt,
+    base,
     '',
     'do it step by step:',
     '1. make the changes in this repo',

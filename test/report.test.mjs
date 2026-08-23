@@ -58,3 +58,15 @@ test('a skipped (proposal-only) card is counted and rendered, not dropped (round
   assert.match(md, /1 skipped/);
   assert.match(md, /proposal-only/);
 });
+
+test('renderReport BOUNDS untrusted fields so a huge goal/testOutput cannot produce a multi-MB report (round 35)', () => {
+  // cell()/fenceSafe() escaped structural chars but never bounded length — every other untrusted-text
+  // sink uses byteCap, report.mjs did not. A 2MB field (a huge minified test line, or a giant pasted
+  // goal flowing straight through the planner) yielded an ~8MB terminal dump / latest.md.
+  const huge = 'x'.repeat(2_000_000);
+  const md = renderReport({ date: '2026-08-22', tokens: 0, costUsd: 0, cards: [
+    { project: 'p', goal: huge, outcome: 'parked', mergeReady: false, whyLine: huge, iterations: 1, branch: 'ghost/x', testOutput: huge, promptsWritten: [huge] },
+  ] });
+  assert.ok(Buffer.byteLength(md) < 200_000, `report bounded despite 2MB fields: ${Buffer.byteLength(md)} bytes`);
+  assert.match(md, /truncated/);   // the cap leaves a visible marker
+});

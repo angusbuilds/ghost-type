@@ -1,7 +1,7 @@
 // test/lib.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byteCap, WORK_DIR, STATE_DIR, readJson, writeJson, engineFailed } from '../src/lib.mjs';
+import { byteCap, WORK_DIR, STATE_DIR, readJson, writeJson, engineFailed, withFileLock } from '../src/lib.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,4 +59,16 @@ test('engineFailed flags every failure shape but not a clean success (round 32 p
   assert.equal(engineFailed({ exitCode: 0, result: { subtype: 'error', result: 'usage limit reached' } }), true);   // fake-claude rate-limit shape: subtype!=='success', no is_error
   assert.equal(engineFailed({ exitCode: 0, result: { subtype: 'error_max_turns' } }), true);    // Claude error subtypes
   assert.equal(engineFailed(null), false);
+});
+
+test('withFileLock runs fn while holding the lock, returns its value, and releases the lock (round 35)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-lock-'));
+  const f = path.join(dir, 'state.json');
+  const r = withFileLock(f, () => { assert.equal(fs.existsSync(f + '.lock'), true, 'lock held during fn'); return 42; });
+  assert.equal(r, 42);
+  assert.equal(fs.existsSync(f + '.lock'), false, 'lock released after fn');
+  // a stale lock (older than the spin budget) is reclaimed rather than blocking forever
+  fs.writeFileSync(f + '.lock', ''); fs.utimesSync(f + '.lock', new Date(0), new Date(0));   // ancient mtime
+  assert.equal(withFileLock(f, () => 7, { attempts: 3, waitMs: 5 }), 7);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
