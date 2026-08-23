@@ -265,3 +265,20 @@ test('hauntDrive waits for minStable identical polls before injecting (H2)', asy
   assert.equal(out.injects, 0);   // never stable → never injected
   assert.equal(sent, 0);
 });
+
+test('driveStep degrades to the goal (keeps driving) when benign pane chatter trips the injection shield, instead of killing the whole night (round 33 HIGH)', async () => {
+  // writeNextPrompt throws SHIELD_HIT when the pane text matches a SIGNALS pattern — and a coding agent
+  // working on THIS repo prints exactly such phrases ("updating the system prompt handling..."). Uncaught,
+  // that unwound past `ghost drive`'s try/finally to main().catch → exit 1, ending the overnight drive on
+  // one benign snapshot. It must degrade to the safe goal like the engineFailed path, not abort.
+  const chatter = 'agent: updating the system prompt handling in sanitize.mjs now';
+  const sent = [];
+  const r = await driveStep({ paneId: '%3', goal: 'keep fixing the parser', prev: chatter, deps: {
+    runner: (...a) => a[0] === 'list-panes' ? '%3' : a[0] === 'display-message' ? 'claude' : chatter,
+    sendKeys: (id, k) => sent.push([id, k]), humanIdleSecs: () => 999,
+    engine: async () => ({ text: 'should not be reached — shield throws first' }),
+    voice: { profile: 'terse', bank: {} }, sleep: async () => {},
+  } });
+  assert.equal(r.state, 'injected');                    // kept driving; did NOT throw/abort
+  assert.equal(r.prompt, 'keep fixing the parser');     // degraded to the SAFE goal, not the pane text
+});

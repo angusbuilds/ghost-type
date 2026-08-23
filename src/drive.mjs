@@ -117,11 +117,22 @@ export function realHumanIdleSecs() {
 // toward the goal, in his voice, given what's on screen).
 export async function composeLivePrompt({ goal, paneOutput, voice, engine }) {
   const card = { goal };
-  return writeNextPrompt({
-    card, diffTail: '', testTail: '', notesTail: '', transcriptTail: paneOutput,
-    voiceProfile: voice.profile, exemplars: exemplarsFor(voice.bank, 'continue'),
-    failure: null, engine,
-  });
+  try {
+    return await writeNextPrompt({
+      card, diffTail: '', testTail: '', notesTail: '', transcriptTail: paneOutput,
+      voiceProfile: voice.profile, exemplars: exemplarsFor(voice.bank, 'continue'),
+      failure: null, engine,
+    });
+  } catch (e) {
+    // writeNextPrompt throws SHIELD_HIT when the pane text trips an injection SIGNALS pattern — and an
+    // agent working on THIS repo prints exactly such phrases ("system prompt", "you are now") as benign
+    // narration. In a LIVE drive there is no card to park, so degrade to the SAFE goal (our own string,
+    // never the pane text — the shield's job is fully satisfied) and keep driving, mirroring the
+    // engineFailed→goal fallback in writeNextPrompt and spine's two catch sites. Uncaught, one benign
+    // snapshot unwound to main().catch → exit 1 and killed the whole overnight drive (round 33 HIGH).
+    if (e && e.message === 'SHIELD_HIT') return goal;
+    throw e;
+  }
 }
 
 // One decision step. Returns the new state + snapshot; the loop owns timing and sleeping.
