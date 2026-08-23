@@ -152,6 +152,30 @@ test('verifyCard REFUSES a DELETED submodule gitlink, not just an added/changed 
   fs.rmSync(main, { recursive: true, force: true });
 });
 
+test('verifyCard REFUSES a passing candidate that broke the code and rewrote the test assertion to a tautology (round 33 CRITICAL — the crown-jewel cheat, end-to-end)', async () => {
+  // The finder's exact live reproduction: candidate flips sum(a,b)=a+b → a-b (broken) AND rewrites the
+  // test's `assert(sum(2,3), 5)` to `assert(sum(2,3), sum(2,3))` (a tautology that PASSES). Before the fix
+  // verifyCard returned pass:true — a genuinely-broken impl shipped wearing the "verified" badge.
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-neuter-'));
+  const g = (...a) => execFileSync('git', a, { cwd: d });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(d, 'sum.js'), 'export const sum = (a, b) => a + b;\n');
+  fs.writeFileSync(path.join(d, 'sum.test.js'),
+    "import test from 'node:test'; import assert from 'node:assert'; import { sum } from './sum.js';\ntest('sum', () => assert.strictEqual(sum(2, 3), 5));\n");
+  g('add', '-A'); g('commit', '-q', '-m', 'base: correct sum + real assertion');
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d }).toString().trim();
+  // the cheat: break the impl, neuter the assertion IN PLACE (no delete/rename, no package.json)
+  fs.writeFileSync(path.join(d, 'sum.js'), 'export const sum = (a, b) => a - b;\n');
+  fs.writeFileSync(path.join(d, 'sum.test.js'),
+    "import test from 'node:test'; import assert from 'node:assert'; import { sum } from './sum.js';\ntest('sum', () => assert.strictEqual(sum(2, 3), sum(2, 3)));\n");
+  const v = await verifyCard(
+    { acceptanceArgv: ['node', '--test', 'sum.test.js'], acceptanceTimeoutSec: 30, goal: 'fix the sum function bug', branch: 'ghost/x' },
+    d, { baseRef: base });
+  assert.equal(v.pass, false, 'a neutered-test candidate must NOT ship even though the tautology passes');
+  assert.match(v.detail.testOutput, /modifies test file/i);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('sterileTree REFUSES a gitlink dir with content but no .git (populated, not initialized), keeps an EMPTY one (round 22 #1)', () => {
   const { main, sub } = mkSubmoduleRepo('gt-guninit-');
   fs.rmSync(path.join(sub, '.git'), { recursive: true, force: true });   // populated (still has 'x') but not initialized
@@ -575,6 +599,31 @@ test('TESTISH catches a test-file deletion across EVERY supported ecosystem — 
   }
   // and a rename that pulls a test out of discovery is still caught
   assert.match(destructiveDiffReason('refactor', '1\t1\tx', 'R100\tsrc/parser.spec.ts\tsrc/parser.ts'), /out of test discovery/);
+});
+
+test('destructiveDiffReason catches an in-place MODIFICATION that neuters a test — the third form of the make-it-pass cheat (round 33 parallel audit)', () => {
+  // Beyond delete (D) and rename-out-of-discovery (R), the observed live cheat edits a test IN PLACE so
+  // its assertions no longer constrain anything (assert(sum(2,3), 5) → assert(sum(2,3), sum(2,3))). A plain
+  // `M` name-status line to a TESTISH file under a build/fix goal was invisible to every guard: this fn only
+  // inspected D/R, and acceptanceNeutered only reads package.json scripts.test. prompt-writer.mjs:34 documents
+  // this exact cheat from a real park run — the soft writer guardrail existed, the hard verify-time one didn't.
+  const cheat = destructiveDiffReason('fix the sum function bug', '1\t1\tsum.test.js\n1\t1\tsum.js', 'M\tsum.test.js\nM\tsum.js');
+  assert.match(String(cheat), /modifies test file/i, 'in-place test modification under a fix goal must be refused');
+  // net-zero (the tautology rewrite is add==del) across every supported ecosystem — gutting thresholds never fire here
+  for (const p of ['src/parser.test.js', 'pkg/parser_test.go', 'tests/test_parser.py', 'src/__tests__/x.js', 'a.spec.ts']) {
+    assert.match(String(destructiveDiffReason('implement the feature', `2\t2\t${p}`, `M\t${p}`)), /modifies test file/i, `in-place edit of ${p} must be refused`);
+  }
+  // A code-only fix that never touches a test is fine.
+  assert.equal(destructiveDiffReason('fix the sum bug', '5\t2\tsum.js', 'M\tsum.js'), null);
+  // Explicit test-EDIT intent (a maintenance verb bound to tests/specs/snapshots) exempts modifying test files
+  // — that IS the job. The cheat's goal is always about the CODE and never names tests as the edit target.
+  assert.equal(destructiveDiffReason('add tests for the parser', '10\t0\tparser.test.js', 'M\tparser.test.js'), null);
+  assert.equal(destructiveDiffReason('expand test coverage for auth', '8\t1\tauth.spec.ts', 'M\tauth.spec.ts'), null);
+  assert.equal(destructiveDiffReason('update the snapshot tests', '3\t3\tui.test.js', 'M\tui.test.js'), null);
+  // A goal that is neither build nor fix (no cheat context) is not flagged for a bare test touch.
+  assert.equal(destructiveDiffReason('investigate the flaky suite', '1\t1\tflaky.test.js', 'M\tflaky.test.js'), null);
+  // "fix the failing parser test" means fix the CODE — an in-place edit to that test is still the cheat.
+  assert.match(String(destructiveDiffReason('fix the failing parser test', '1\t1\tparser.test.js', 'M\tparser.test.js')), /modifies test file/i);
 });
 
 test('destructiveDiffReason closes the round-9 exemption bypasses', () => {

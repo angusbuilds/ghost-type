@@ -372,6 +372,12 @@ export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
   // parser tests" (a clause break separates them), while allowing "remove the flaky parser test"
   // (round 9/10 High).
   const testRemovalIntent = /\b(delete|remove|drop|prune|strip|deprecate)\b(?:(?!\b(?:and|but|then|or|also|plus|while|when|so|as|to|for|after|before|because|if|although|though|yet)\b)[^.;,\n]){0,40}\b(tests?|specs?)\b/i.test(g);
+  // Explicit test-EDIT intent: a maintenance/authoring verb bound in the SAME CLAUSE to tests/specs/
+  // snapshots/fixtures/coverage — exempts an in-place test MODIFICATION below. The neuter cheat's goal is
+  // always about the CODE ("fix the sum bug", "implement X") and NEVER names tests as the edit target, so
+  // "fix the failing parser test" (means fix the code) is deliberately NOT exempt (no edit verb bound to a
+  // test noun — "fix" is excluded), while "update the snapshot tests" / "expand test coverage" are (round 33).
+  const testEditIntent = /\b(write|add|create|author|expand|extend|broaden|increase|updat(e|ed|es|ing)|revis(e|ed|es|ing)|adjust|refresh|regenerat(e|ed|es|ing)|maintain|improv(e|ed|es|ing)|rework|cover|more|additional)\b(?:(?!\b(?:and|but|then|or|also|plus|while|when|so|as|to|for|after|before|because|if|although|though|yet)\b)[^.;,\n]){0,40}\b(tests?|specs?|snapshots?|fixtures?|coverage)\b/i.test(g);
   // Map each file to its numstat so we can tell a binary deletion (`-\t-`) from a text one.
   const sizes = {};
   for (const l of String(numstat).split('\n')) {
@@ -386,6 +392,15 @@ export function destructiveDiffReason(goal, numstat = '', nameStatus = '') {
     }
     const ren = l.match(/^R\d*\t(.+)\t(.+)$/);
     if (ren && TESTISH.test(ren[1]) && !TESTISH.test(ren[2]) && !testRemovalIntent) return `renames test ${ren[1]} out of test discovery`;
+    // In-place MODIFICATION of a test file under a build/fix goal is the third form of the neuter cheat
+    // (edit the assertion to a tautology — invisible to the D/R checks and to acceptanceNeutered, which
+    // only reads package.json scripts.test). Fail-closed: refuse unless the goal explicitly edits/authors
+    // tests. A false positive parks the clone (preserved + surfaced by doctor) for the morning diff review
+    // — the safe direction for the #1 property; a false pass wearing the "verified" badge is not (round 33).
+    const mod = l.match(/^M\t(.+)$/);
+    if (mod && TESTISH.test(mod[1]) && hasBuildOrFix && !testEditIntent && !testRemovalIntent) {
+      return `modifies test file ${mod[1]} in place (a build/fix goal must satisfy the existing test, not edit it)`;
+    }
   }
   if (pureDeletionGoal) return null;   // ONLY a pure deletion goal skips the size checks below
   // Per-file gutting (>=100 catches exactly-100) OR aggregate net deletion across many files.
