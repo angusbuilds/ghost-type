@@ -9,6 +9,7 @@ function esc(s) {
 
 export function renderReportHtml(night) {
   const shipped = night.cards.filter(c => c.mergeReady).length;
+  const proposed = night.cards.filter(c => c.outcome === 'proposed').length;   // a no-runner repo's outcome — was dropped from the strip (round 34)
   const parked = night.cards.filter(c => c.outcome === 'parked').length;
   const skipped = night.cards.filter(c => c.outcome === 'skipped').length;
   // Render the ACTUAL outcome — a skipped proposal is not "parked" (round 5 M8).
@@ -74,7 +75,7 @@ export function renderReportHtml(night) {
 <body><div class="wrap">
   <h1>👻 Ghost Type</h1>
   <p class="sub">${esc(night.date)}</p>
-  <div class="verdict">${shipped} shipped · ${parked} parked${skipped ? ` · ${skipped} skipped` : ''} · ${esc(night.tokens)} tokens · $${Number(night.costUsd || 0).toFixed(2)}</div>
+  <div class="verdict">${shipped} shipped${proposed ? ` · ${proposed} proposed` : ''} · ${parked} parked${skipped ? ` · ${skipped} skipped` : ''} · ${esc(night.tokens)} tokens · $${Number(night.costUsd || 0).toFixed(2)}</div>
   ${night.tripReason ? `<p class="sub">stopped early: ${esc(night.tripReason)}</p>` : ''}
   <table>
     <thead><tr><th>project</th><th>merge-ready</th><th>why</th><th>iters</th></tr></thead>

@@ -40,8 +40,27 @@ test('renderReportHtml labels a skipped card as skipped, not parked (round 5 M8)
   assert.match(html, /1 skipped/);      // counted in the verdict strip
 });
 
+test('renderReportHtml counts a PROPOSED card in the verdict strip, matching the markdown report (round 34)', () => {
+  // A no-runner repo produces outcome:'proposed'. The HTML verdict strip counted only shipped/parked/
+  // skipped, so a proposed card silently vanished from the headline the owner reads first — and the
+  // side-by-side markdown report (which DOES count proposed) disagreed on total cards processed.
+  const withProposed = { ...night, cards: [
+    { project: 'demo', goal: 'x', outcome: 'shipped', mergeReady: true, whyLine: 'green', iterations: 1, branch: 'ghost/a', testOutput: 'ok', promptsWritten: [] },
+    { project: 'noRunner', goal: 'y', outcome: 'proposed', mergeReady: false, whyLine: 'plan written', iterations: 0, branch: 'ghost/b', testOutput: '', promptsWritten: [] },
+  ] };
+  const html = renderReportHtml(withProposed);
+  assert.match(html, /1 proposed/);   // present in the headline, not silently dropped
+});
+
+test('verdictLine surfaces proposals so a proposal-only night is not pushed as "0 shipped · 0 parked" (round 34)', () => {
+  const proposalNight = { ...night, cards: [
+    { project: 'noRunner', goal: 'x', outcome: 'proposed', mergeReady: false, whyLine: 'plan written', iterations: 0, branch: 'ghost/p', testOutput: '', promptsWritten: [] },
+  ] };
+  assert.equal(verdictLine(proposalNight), '0 shipped · 1 proposed · 0 parked · review 0 branches');
+});
+
 test('verdictLine summarizes shipped/parked/review', () => {
-  assert.equal(verdictLine(night), '1 shipped · 1 parked · review 1 branch');
+  assert.equal(verdictLine(night), '1 shipped · 1 parked · review 1 branch');   // no proposals → terse, unchanged
 });
 
 test('notify never throws and reports success via injected runner', () => {
