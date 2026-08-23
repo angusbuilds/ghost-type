@@ -1,7 +1,7 @@
 // test/spine.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runCard, runCardSafely, runNight, runProposal, runCardQueue, shipCard, shipProposal } from '../src/spine.mjs';
+import { runCard, runCardSafely, runNight, runProposal, runCardQueue, shipCard, shipProposal, skippedCardRecords } from '../src/spine.mjs';
 import { Governor } from '../src/governor.mjs';
 
 test('runProposal has the agent write PLAN.md and commits it to the branch, reported as proposed (round 28 #13)', async () => {
@@ -454,4 +454,20 @@ test('shipProposal is a no-op for a skipped proposal (no commit) (round 31 night
   const r = { outcome: 'skipped', mergeReady: false };
   shipProposal({ repoPath: '/r', branch: 'ghost/s' }, r, { fetchBranchBack: () => { touched = true; }, reapClone: () => { touched = true; }, workDir: '/w' });
   assert.equal(touched, false);
+});
+
+test('skippedCardRecords reports every planned card not already in results as skipped — bin coding-loop parity with runCardQueue (round 35)', () => {
+  const cards = [
+    { project: 'a', goal: 'ga', branch: 'ghost/a' },
+    { project: 'b', goal: 'gb', branch: 'ghost/b' },
+    { project: 'c', goal: 'gc', branch: 'ghost/c' },
+  ];
+  // only card a ran (its branch is in results); b + c never started (a governor trip or interrupt mid-queue)
+  const recs = skippedCardRecords(cards, ['ghost/a'], 'governor: night-deadline');
+  assert.equal(recs.length, 2);
+  assert.deepEqual(recs.map(r => r.branch), ['ghost/b', 'ghost/c']);
+  assert.ok(recs.every(r => r.outcome === 'skipped' && r.mergeReady === false && r.iterations === 0));
+  assert.match(recs[0].whyLine, /^not started — governor: night-deadline$/);
+  // idempotent: a fully-run (or already-skip-recorded) queue yields NO extra records
+  assert.deepEqual(skippedCardRecords(cards, ['ghost/a', 'ghost/b', 'ghost/c'], 'x'), []);
 });

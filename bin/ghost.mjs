@@ -16,7 +16,7 @@ import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
 import { learn as learnVoice, loadVoice, exemplarsFor } from '../src/voice.mjs';
 import { armChecks, arm, disarm, readState, writeState, heartbeatGapMs, reap, reapClone, reconcile, startCaffeinate, stopCaffeinate, writeHeartbeat } from '../src/daemon.mjs';
-import { runCardSafely, runProposal, shipCard, shipProposal } from '../src/spine.mjs';
+import { runCardSafely, runProposal, shipCard, shipProposal, skippedCardRecords } from '../src/spine.mjs';
 import { runEngine, runAgent } from '../src/engine.mjs';
 import { shapeForEngine } from '../src/engine-rules.mjs';
 import { verifyCard, patchApplied, classifyClaim, sterileTree } from '../src/verifier.mjs';
@@ -257,6 +257,11 @@ async function main() {
           const post = gov.check(Date.now());   // a trip on the LAST proposal must still reach the report (round 31 night audit #4)
           if (!post.ok && !tripReason) tripReason = post.trip;
         }
+        // Any planned card that never ran — arm-time refusal (runnable=false), an interrupt, or a governor
+        // trip partway through — must still appear as SKIPPED, or the report understates what was planned.
+        // The inline coding loop only pushed results for cards it started (unlike the proposal loop +
+        // runCardQueue's round-28 #14); idempotent vs the proposal skips already pushed (round 35).
+        results.push(...skippedCardRecords(cards, results.map(r => r.branch), tripReason || (interrupted ? 'interrupted' : 'stopped')));
       } finally {
         if (hb) clearInterval(hb);
         stopCaffeinate(caff);

@@ -312,6 +312,22 @@ export function shipProposal(card, r, { fetchBranchBack, reapClone, workDir }) {
   return r;
 }
 
+// Skip-records for planned cards that never ran — an arm-time refusal (nothing runnable), an interrupt,
+// or a governor trip partway through the queue. The bin's `on` loop runs cards INLINE and pushes a result
+// only for cards it STARTED, so never-started cards silently vanished from the morning report — unlike the
+// proposal loop beside it and runCardQueue's round-28 #14 skip-reporting (a symptom of the still-open
+// night-loop divergence). Given the branches already in `results`, emit a 'skipped' record for every
+// planned card not among them so the report never understates what was planned. Idempotent: a card the
+// proposal loop already skip-recorded is left alone; a fully-run queue yields none (round 35).
+export function skippedCardRecords(cards, seenBranches, whyLine) {
+  const seen = new Set(seenBranches);
+  return cards.filter(c => !seen.has(c.branch)).map(c => ({
+    project: c.project, goal: c.goal, outcome: 'skipped', mergeReady: false,
+    whyLine: `not started — ${whyLine}`, branch: c.branch,
+    iterations: 0, promptsWritten: [], testOutput: '', ledger: [], falseDoneCount: 0,
+  }));
+}
+
 // ⚠ Still NOT the production night loop (the daemon's `on` case remains inline pending the gated
 // step 3 of the dedupe plan). Now a thin wrapper over runCardQueue so its tests exercise the SHARED
 // core — the same loop the bin will adopt — instead of a divergent copy.
