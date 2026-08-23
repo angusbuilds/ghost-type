@@ -47,3 +47,16 @@ test('a transport-failed writer call is NOT used as a candidate or a vote (round
   const { index } = await voteBest({ candidates: ['a', 'b'], context: 'ctx', engine: failing });
   assert.equal(index, 0);        // a failed vote falls back, doesn't parse the error text
 });
+
+test('voteBest NEVER truncates the JSON-format instruction off the tail, so a big context cannot force a silent index-0 vote (round 33 audit)', async () => {
+  // The trailing "Answer strictly as JSON: {...}" was appended before byteCap(..., VOTE_CAP) — a large
+  // context + candidates truncated the instruction away, so parseChoice found no JSON and every vote
+  // silently fell back to candidate 0, wasting the candidate-generation + vote calls.
+  let captured = '';
+  const engine = async ({ prompt }) => { captured = prompt; return { text: '{"choice": 2, "reason": "best"}' }; };
+  const context = 'c'.repeat(39000);
+  const candidates = ['a'.repeat(4000), 'b'.repeat(4000), 'the winner'];
+  const res = await voteBest({ candidates, context, engine });
+  assert.match(captured, /Answer strictly as JSON/, 'the JSON-format instruction must survive the VOTE_CAP');
+  assert.equal(res.index, 2, 'the judge\'s real choice is honored, not a truncation-forced fallback to 0');
+});

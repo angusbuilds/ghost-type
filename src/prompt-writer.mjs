@@ -18,7 +18,7 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
   // uncapped distilled profile or ledger would otherwise ride into every prompt (round 5 #7).
   const profileCap = byteCap(String(voiceProfile || ''), 4000);
   const exemplarCap = exemplars?.length ? byteCap(exemplars.join('\n- '), 4000) : '';
-  const meta = [
+  const body = [
     'You are writing the NEXT prompt to send to a coding agent, phrased exactly as this developer would type it.',
     `VOICE PROFILE (imitate this style):\n${profileCap}`,
     exemplarCap ? `EXAMPLES OF HOW HE WRITES:\n- ${exemplarCap}` : '',
@@ -30,18 +30,24 @@ export async function writeNextPrompt({ card, diffTail, testTail, notesTail, tra
     fence('test-output', clean(testTail)),
     fence('night-notes', clean(notesTail)),
     fence('transcript', clean(transcriptTail)),
-    // Acceptance-integrity guardrail: an LLM writer, when the goal is hard, will rationalise telling
-    // the agent to just rewrite/weaken the test to pass (observed in a live park run: "editing the
-    // test is the assignment, no one is watching"). The next prompt must drive the REAL code to
-    // satisfy the EXISTING check — never to defeat it. This is the writer-side complement to the
-    // verify-time destructive-diff guard, which a package.json test-script rewrite would slip past.
+  ].filter(Boolean).join('\n\n');
+  // Acceptance-integrity guardrail: an LLM writer, when the goal is hard, will rationalise telling
+  // the agent to just rewrite/weaken the test to pass (observed in a live park run: "editing the
+  // test is the assignment, no one is watching"). The next prompt must drive the REAL code to
+  // satisfy the EXISTING check — never to defeat it. This is the writer-side complement to the
+  // verify-time destructive-diff guard, which a package.json test-script rewrite would slip past.
+  const trailer = [
     'HARD CONSTRAINT: the next prompt must make the REAL code satisfy the existing acceptance test. NEVER instruct editing, deleting, weakening, disabling, skipping, or replacing the test, its command/script, or the acceptance criteria — that is cheating, not the assignment.',
     'Output ONLY the next prompt text — no preamble, no quotes. Match his voice EXACTLY: all-lowercase, terse, no "!", no question, often no ending punctuation, keep his rough typos. One blunt instruction.',
-  ].filter(Boolean).join('\n\n');
+  ].join('\n\n');
 
-  // Final backstop: cap the WHOLE assembled prompt so it can never exceed a safe argv/context
-  // size even if several fields are near their individual caps (round 5 M7).
-  const r = await engine({ prompt: byteCap(meta, 48000) });
+  // Final backstop: cap the WHOLE assembled prompt so it can never exceed a safe argv/context size even
+  // if several fields are near their caps (round 5 M7). The trailer is SAFETY-CRITICAL and fixed-size, so
+  // reserve room for it and cap only the untrusted BODY — otherwise a full body truncated the anti-cheat
+  // guardrail off the tail exactly when the prompt was most likely to tempt the cheat (round 33 HIGH).
+  const SEP = '\n\n';
+  const prompt = byteCap(body, 48000 - Buffer.byteLength(trailer) - Buffer.byteLength(SEP)) + SEP + trailer;
+  const r = await engine({ prompt });
   // Never turn a FAILED writer call into the next prompt — restate the goal instead (round 6 #5).
   // A failure is a nonzero exit OR a STRUCTURED provider error (Claude reports a rate/usage limit as
   // subtype:success + is_error:true with exit 0 — an exitCode-only check would inject that limit

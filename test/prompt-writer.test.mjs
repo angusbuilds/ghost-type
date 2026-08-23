@@ -45,6 +45,25 @@ test('a runaway voiceProfile/ledgerTable cannot blow up the assembled prompt (ro
   assert.ok(Buffer.byteLength(captured) < 60000, `assembled prompt bounded: ${Buffer.byteLength(captured)} bytes`);
 });
 
+test('writeNextPrompt NEVER truncates the anti-cheat guardrail off the tail, even when every untrusted field is at its cap (round 33 HIGH)', async () => {
+  // The guardrail + output-format lines were appended AFTER the untrusted fields, then the whole meta was
+  // byteCap'd from the TAIL — so a big diff + verbose failing-test output silently dropped the "never edit
+  // the test" instruction exactly when the prompt was most likely to tempt the writer into the cheat.
+  let captured = '';
+  const engine = async ({ prompt }) => { captured = prompt; return { text: 'ok' }; };
+  const big = 'x'.repeat(12000);
+  await writeNextPrompt({
+    card: { goal: 'fix the flaky parser' },
+    diffTail: big, testTail: big, notesTail: big, transcriptTail: big, rawTrace: big, ledgerTable: big,
+    voiceProfile: 'v'.repeat(4000), exemplars: ['e'.repeat(4000)],
+    failure: { code: 1, stderrHead: big },
+    engine,
+  });
+  assert.match(captured, /HARD CONSTRAINT/, 'the anti-cheat guardrail must survive truncation');
+  assert.match(captured, /Output ONLY the next prompt/, 'the output-format instruction must survive truncation');
+  assert.ok(Buffer.byteLength(captured) < 49000, `still bounded near the 48KB cap (+truncation-marker slack): ${Buffer.byteLength(captured)} bytes`);
+});
+
 test('shield hit on transcript throws a tagged error (caller parks the card)', async () => {
   const engine = async () => ({ text: 'nope' });
   await assert.rejects(() => writeNextPrompt({

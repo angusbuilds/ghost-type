@@ -27,8 +27,13 @@ export async function generateCandidates({ context, n = 3, engine }) {
 export async function voteBest({ candidates, context, engine }) {
   if (candidates.length <= 1) return { choice: candidates[0] ?? '', index: 0 };
   const list = candidates.map((c, i) => `CANDIDATE ${i}:\n${byteCap(String(c), CAND_CAP)}`).join('\n\n');
+  // The JSON-format instruction is fixed-size and tells the judge HOW to answer — reserve room for it and
+  // cap only the context/candidate body, else a large context truncated it off the tail so parseChoice
+  // found no JSON and every vote silently fell back to candidate 0, wasting the whole preflight (round 33).
+  const trailer = '\n\nAnswer strictly as JSON: {"choice": <index>, "reason": "..."}.';
+  const body = `${context}\n\nHere are candidate next-prompts. Pick the ONE most likely to make real progress.\n\n${list}`;
   const r = await engine({
-    prompt: byteCap(`${context}\n\nHere are candidate next-prompts. Pick the ONE most likely to make real progress.\n\n${list}\n\nAnswer strictly as JSON: {"choice": <index>, "reason": "..."}.`, VOTE_CAP),
+    prompt: byteCap(body, VOTE_CAP - Buffer.byteLength(trailer)) + trailer,
   });
   const text = okText(r);
   const index = parseChoice(text, candidates.length);
