@@ -350,33 +350,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = main
     }
 
-    // The ghost itself, drawn as a menu-bar glyph. As a TEMPLATE image at idle, macOS
-    // paints it white on a dark bar and black on a light one — the old 8px
-    // tertiaryLabelColor dot was dark-gray-on-black on a dark menu bar, i.e. invisible,
-    // which read as "the app didn't open". Driving keeps the one violet accent.
+    // The ghost itself in the menu bar — the exact brand glyph, shipped as a rendered
+    // template PNG in Resources (a hand-ported bezier approximation read as a blob). As a
+    // TEMPLATE image macOS paints it white on dark bars, black on light; driving tints the
+    // same alpha mask violet via sourceAtop.
+    private static let ghostBase: NSImage = {
+        let path = Bundle.main.path(forResource: "ghost-menu@2x", ofType: "png") ?? ""
+        let img = NSImage(contentsOfFile: path) ?? NSImage(size: NSSize(width: 18, height: 18))
+        img.size = NSSize(width: 18, height: 18)
+        return img
+    }()
     private func ghostGlyph(_ color: NSColor, template: Bool) -> NSImage {
-        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            let p = NSBezierPath()
-            p.windingRule = .evenOdd
-            // body: flat sides, domed top, three scallops along the bottom hem
-            p.move(to: NSPoint(x: 2, y: 3.2))
-            p.line(to: NSPoint(x: 2, y: 9))
-            p.appendArc(withCenter: NSPoint(x: 9, y: 9), radius: 7, startAngle: 180, endAngle: 0, clockwise: false)
-            p.line(to: NSPoint(x: 16, y: 3.2))
-            p.appendArc(withCenter: NSPoint(x: 13.7, y: 3.2), radius: 2.3, startAngle: 0, endAngle: 180, clockwise: true)
-            p.appendArc(withCenter: NSPoint(x: 9, y: 3.2), radius: 2.3, startAngle: 0, endAngle: 180, clockwise: false)
-            p.appendArc(withCenter: NSPoint(x: 4.3, y: 3.2), radius: 2.3, startAngle: 0, endAngle: 180, clockwise: true)
-            p.close()
-            // eyes + the cursor mouth, punched out by the even-odd rule
-            p.appendOval(in: NSRect(x: 4.9, y: 8.6, width: 3.0, height: 3.0))
-            p.appendOval(in: NSRect(x: 10.1, y: 8.6, width: 3.0, height: 3.0))
-            p.appendRect(NSRect(x: 8.2, y: 4.4, width: 1.6, height: 2.8))
+        let base = Self.ghostBase
+        if template {
+            let i = base.copy() as! NSImage
+            i.isTemplate = true
+            return i
+        }
+        let i = NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
             color.setFill()
-            p.fill()
+            rect.fill(using: .sourceAtop)
             return true
         }
-        img.isTemplate = template
-        return img
+        return i
     }
 
     // Menu-bar title = the terminal name it's driving (or a quiet dot when idle). Paints

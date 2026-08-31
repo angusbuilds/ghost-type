@@ -128,8 +128,6 @@ struct TerminalPickerView: View {
             if tabs.isEmpty {
                 Text("no Terminal tabs found")
                     .font(Theme.body).foregroundColor(Theme.ink3)
-                Text("open one, or type `ghost join` in any terminal")
-                    .font(Theme.caption).foregroundColor(Theme.ink3)
             } else {
                 VStack(spacing: 3) {
                     ForEach(tabs) { tab in
@@ -141,11 +139,48 @@ struct TerminalPickerView: View {
                         .font(Theme.caption).foregroundColor(Theme.ink3)
                 }
             }
+            CopyJoinRow()
         }
         .padding(.horizontal, Theme.margin)
         .padding(.vertical, Theme.Space.s3)
         .frame(width: 340)
         .background(VisualEffect(material: .menu).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)))
+    }
+}
+
+// The do-it-yourself road, one click away: copies `ghost join` so any terminal —
+// iTerm, ssh, whatever the picker can't see — can turn itself on with a paste.
+struct CopyJoinRow: View {
+    @State private var hover = false
+    @State private var copied = false
+    var body: some View {
+        Button(action: {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("ghost join", forType: .string)
+            withAnimation(.easeOut(duration: 0.12)) { copied = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                withAnimation(.easeOut(duration: 0.3)) { copied = false }
+            }
+        }) {
+            HStack(spacing: 10) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(copied ? Theme.violet : (hover ? Theme.ink2 : Theme.ink3))
+                    .frame(width: 12)
+                Text("ghost join").font(Theme.value)
+                    .foregroundColor(hover || copied ? Theme.ink : Theme.ink2)
+                Text(copied ? "copied — paste in any terminal" : "copy · turns on the terminal you paste it in")
+                    .font(Theme.caption).foregroundColor(copied ? Theme.violet : Theme.ink3)
+                Spacer()
+            }
+            .padding(.horizontal, Theme.Space.s3)
+            .padding(.vertical, 6)
+            .background(hover ? Theme.hover : Color.clear)
+            .cornerRadius(Theme.rowRadius)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
     }
 }
 
