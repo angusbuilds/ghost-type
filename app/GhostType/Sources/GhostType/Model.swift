@@ -221,19 +221,22 @@ final class GhostModel: ObservableObject {
         }
     }
 
-    // The picker's connect action: adoption is orchestrated by `ghost adopt` in the tested
-    // Node layer (Ctrl-C, wait, join, relaunch --continue) — the app just asks and refreshes.
-    func adoptTab(tty: String, completion: @escaping (Bool) -> Void) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            let out = self.run(["adopt", tty])
-            // Adoption ends with a relaunch that takes a beat; refresh after it settles.
-            Thread.sleep(forTimeInterval: 1.0)
-            DispatchQueue.main.async {
-                completion(out.contains("adopted"))
-                self.refresh()
-            }
-        }
+    // The picker's connect action. Detached, like startDrive: adoption now WAITS for the
+    // agent to be idle before doing anything (up to 15 minutes — it never interrupts a
+    // running task), and the bridge queue is serial — parking refresh behind a quarter-hour
+    // wait would freeze every label in the app. The registry and the 4s refresh surface the
+    // result when it lands; the CLI process logs its own progress.
+    func adoptTab(tty: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: node)
+        p.arguments = nodeIsEnvWrapper ? ["node", ghost, "adopt", tty] : [ghost, "adopt", tty]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
+        p.environment = env
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
     }
 
     func undrive(_ paneId: String) {

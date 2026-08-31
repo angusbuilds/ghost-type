@@ -24,6 +24,8 @@ function deps(over = {}) {
       doScript: (tab, text) => calls.push(['doScript', tab.tty, text]),
       waitForIdle: async () => { calls.push(['waitForIdle']); return true; },
       sleep: async () => {},
+      agentCpu: () => 0.4,          // idle at the prompt unless a test says otherwise
+      tabTail: () => '❯ ',
       ...over,
     },
   };
@@ -111,4 +113,52 @@ test('listTabs drops tabs already inside tmux and survives an empty ps read', as
   assert.equal(tabs.length, 1);
   assert.equal(tabs[0].tty, '/dev/ttys011');
   assert.deepEqual(tabs[0].processes, []);
+});
+
+// Gentle connect: adoption must never interrupt an agent mid-task. Before the Ctrl-C it
+// waits until the agent is genuinely at its input prompt — two consecutive near-zero CPU
+// samples AND no busy marker ("esc to interrupt") in the tab's visible tail — and if the
+// agent never goes quiet it declines, touching nothing.
+function gentleDeps(cpuSeq, tails, over = {}) {
+  const calls = [];
+  let ci = 0, ti = 0;
+  return {
+    calls,
+    d: {
+      findTab: (tty) => ({ windowId: 1, tabIndex: 1, tty, busy: true, processes: ['login', '-zsh', 'caffeinate', 'claude'] }),
+      foregroundArgv: () => 'claude',
+      agentPid: () => 4242,
+      shellCwd: () => '/Users/angus/dev/proj',
+      agentCpu: () => cpuSeq[Math.min(ci++, cpuSeq.length - 1)],
+      tabTail: () => tails[Math.min(ti++, tails.length - 1)],
+      kill: (pid, sig) => calls.push(['kill', pid, sig]),
+      doScript: (tab, text) => calls.push(['doScript', text]),
+      waitForIdle: async () => true,
+      sleep: async () => {},
+      maxQuietWaitMs: 10_000,
+      ...over,
+    },
+  };
+}
+
+test('adopt waits out a working agent and connects only once it goes quiet', async () => {
+  const { d, calls } = gentleDeps([48, 41, 1.2, 0.6], ['⏺ working… esc to interrupt', '❯ ']);
+  const r = await adoptTab('/dev/ttys001', d);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(calls.filter(c => c[0] === 'kill'), [['kill', 4242, 'SIGINT'], ['kill', 4242, 'SIGINT']]);
+});
+
+test('adopt declines (nothing signalled, nothing typed) when the agent never goes idle', async () => {
+  const { d, calls } = gentleDeps([55, 60, 52, 58, 49, 51], ['⏺ working… esc to interrupt']);
+  const r = await adoptTab('/dev/ttys001', d);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /still working/i);
+  assert.deepEqual(calls, [], 'a busy agent must never be signalled or typed at');
+});
+
+test('quiet CPU alone is not enough — a busy screen marker still blocks the connect', async () => {
+  const { d, calls } = gentleDeps([0.5, 0.4], ['✳ thinking… (esc to interrupt)']);
+  const r = await adoptTab('/dev/ttys001', d);
+  assert.equal(r.ok, false);
+  assert.deepEqual(calls, []);
 });

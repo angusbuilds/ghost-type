@@ -37,6 +37,25 @@ export async function adoptTab(tty, deps) {
 
   const pid = agentPid(tab, agent);
   const argv = foregroundArgv(tab, agent);
+
+  // NEVER interrupt an agent mid-task: connect waits until it is genuinely at its input
+  // prompt — two consecutive near-zero CPU samples AND no busy marker in the visible tail
+  // ("esc to interrupt" is what claude shows the entire time it works). If it never goes
+  // quiet inside the window, decline without touching anything.
+  const { agentCpu, tabTail, quietPollMs = 1200, maxQuietWaitMs = 15 * 60_000, onWait } = deps;
+  let waited = 0, quiet = false;
+  while (waited <= maxQuietWaitMs) {
+    const a = agentCpu(pid);
+    await sleep(quietPollMs);
+    const b = agentCpu(pid);
+    const busyScreen = /esc to interrupt|thinking…|working…/i.test(String(tabTail(tab) || ''));
+    if (a < 3 && b < 3 && !busyScreen) { quiet = true; break; }
+    if (onWait) onWait({ cpu: b, busyScreen });
+    await sleep(quietPollMs);
+    waited += quietPollMs * 2;
+  }
+  if (!quiet) return { ok: false, reason: `the ${agent} in ${tty} is still working — connect never interrupts a running task; it will succeed once the agent is idle` };
+
   // Two INTs, like two Ctrl-Cs — claude's "press ctrl-c again to exit" needs the second.
   kill(pid, 'SIGINT');
   await sleep(350);
@@ -130,6 +149,20 @@ export function realShellCwd(tab) {
   return '';
 }
 
+// The agent's instantaneous CPU — near zero at an input prompt, busy while working.
+export function realAgentCpu(pid) {
+  try { return parseFloat(execFileSync('ps', ['-p', String(pid), '-o', '%cpu='], { stdio: ['ignore', 'pipe', 'ignore'] }).toString()) || 0; }
+  catch { return 0; }
+}
+
+// The tab's visible tail — claude paints "esc to interrupt" the whole time it works.
+export function realTabTail(tab) {
+  try {
+    const out = osascript(`tell application "Terminal" to get contents of tab ${tab.tabIndex} of window id ${tab.windowId}`);
+    return out.split('\n').filter(l => l.trim()).slice(-6).join('\n');
+  } catch { return ''; }
+}
+
 export function realDoScript(tab, text) {
   const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   osascript(`tell application "Terminal" to do script "${escaped}" in tab ${tab.tabIndex} of window id ${tab.windowId}`);
@@ -156,6 +189,9 @@ export function realAdoptDeps() {
     // An agent that exits on the FIRST Ctrl-C makes the second kill hit a dead pid —
     // that's success, not an error.
     kill: (pid, sig) => { try { process.kill(pid, sig); } catch { /* already gone */ } },
+    agentCpu: realAgentCpu,
+    tabTail: realTabTail,
+    onWait: ({ cpu, busyScreen }) => console.log(`  waiting — agent still working (cpu ${cpu.toFixed(0)}%${busyScreen ? ', busy on screen' : ''})…`),
     doScript: realDoScript,
     waitForIdle: realWaitForIdle,
     sleep: (ms) => new Promise(r => setTimeout(r, ms)),

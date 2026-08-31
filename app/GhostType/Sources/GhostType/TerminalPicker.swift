@@ -84,13 +84,13 @@ final class TerminalPickerController: NSObject {
     }
 
     private func join(_ tab: TermTab) {
-        // Both roads lead through `ghost adopt`: idle → scripted join; running agent →
-        // Ctrl-C ×2 → join → same command + --continue. One click either way.
-        model.adoptTab(tty: tab.tty) { [weak self] ok in
-            guard let self else { return }
-            if ok { self.onJoined() }
-            self.dismiss()
-        }
+        // Both roads lead through `ghost adopt`: idle tab → scripted join; running agent →
+        // wait-for-idle → Ctrl-C ×2 → join → same command + --continue. The CLI owns the
+        // waiting (it never interrupts a working agent); the session list picks the result
+        // up on the normal refresh cadence.
+        model.adoptTab(tty: tab.tty)
+        onJoined()
+        dismiss()
     }
 
     func dismiss() {
@@ -135,7 +135,7 @@ struct TerminalPickerView: View {
                     }
                 }
                 if tabs.contains(where: { $0.busy }) {
-                    Text("connect restarts the agent with --continue — history kept, ~3s blip")
+                    Text("connect waits until the agent is idle — it never interrupts a task; --continue keeps history")
                         .font(Theme.caption).foregroundColor(Theme.ink3)
                 }
             }
