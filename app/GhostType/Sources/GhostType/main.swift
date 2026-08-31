@@ -304,6 +304,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let t = Timer(timeInterval: 4, repeats: true) { [weak self] _ in self?.updateMenuBar() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+
+        // Launch feedback: an accessory app has no window and no Dock bounce, so a launch
+        // with no open dropdown is indistinguishable from "nothing happened" — the original
+        // popover build showed itself on launch for exactly this reason. The delay lets the
+        // first refresh land so the panel opens populated, not empty.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showDropdown() }
+    }
+
+    // Double-clicking the app icon while it's already running fires reopen, not launch —
+    // without this it looks like the app "won't open". Same feedback: show the dropdown.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showDropdown()
+        return true
     }
 
     // Only drives this app spawned are stopped here — a CLI-started drive is left running,
