@@ -2,6 +2,20 @@
 
 All notable changes to Ghost Type. Dates are the day the work landed.
 
+## [0.2.3] — 2026-08-30
+
+- **Connect to a RUNNING session, one click** — the picker's busy claude rows are now a
+  live `connect` action backed by `ghost adopt <tty>`: the same two Ctrl-Cs a human sends
+  (SIGINT to the agent's own pid — no focus stealing, works on background tabs), wait for
+  the shell, script `ghost join` in, then relaunch the tab's exact original command +
+  `--continue` — history intact, caffeinate wrapper preserved, ~3s blip. Fail-closed:
+  nothing is ever typed into a tab that hasn't actually gone idle, and busy non-agents
+  stay hands-off.
+- **`ghost tabs [--json]`** — Terminal.app tab listing for the picker: AppleScript for
+  geometry only (window/tab/tty/busy), `ps -t` for process chains — Terminal's own
+  `processes` property intermittently dies with a -1700 coercion error under load (as does
+  the bare word `tab` inside a Terminal tell block, which is its tab *class*).
+
 ## [0.2.2] — 2026-08-30
 
 - **Pick a terminal instead of typing in one** — a quiet `+ add a terminal` row in the

@@ -84,7 +84,9 @@ final class TerminalPickerController: NSObject {
     }
 
     private func join(_ tab: TermTab) {
-        model.joinTerminalTab(tab) { [weak self] ok in
+        // Both roads lead through `ghost adopt`: idle → scripted join; running agent →
+        // Ctrl-C ×2 → join → same command + --continue. One click either way.
+        model.adoptTab(tty: tab.tty) { [weak self] ok in
             guard let self else { return }
             if ok { self.onJoined() }
             self.dismiss()
@@ -135,7 +137,7 @@ struct TerminalPickerView: View {
                     }
                 }
                 if tabs.contains(where: { $0.busy }) {
-                    Text("busy tabs: ctrl-c inside, then it joins — `claude --continue` restores")
+                    Text("connect restarts the agent with --continue — history kept, ~3s blip")
                         .font(Theme.caption).foregroundColor(Theme.ink3)
                 }
             }
@@ -152,6 +154,12 @@ struct TermTabRow: View {
     let action: () -> Void
     @State private var hover = false
 
+    // A busy CODING AGENT can be adopted (Ctrl-C → join → --continue restores it); any
+    // other busy process would lose real state to a Ctrl-C, so those stay hands-off.
+    private var connectable: Bool {
+        !tab.busy || ["claude", "codex", "aider"].contains(tab.process.lowercased())
+    }
+
     // Window names carry Terminal's own suffix ("… — 120×38") — noise at this width.
     private var cleanName: String {
         let name = tab.windowName.replacingOccurrences(of: #" — \d+×\d+$"#, with: "", options: .regularExpression)
@@ -159,26 +167,26 @@ struct TermTabRow: View {
     }
 
     var body: some View {
-        Button(action: { if !tab.busy { action() } }) {
+        Button(action: { if connectable { action() } }) {
             HStack(spacing: 10) {
                 Circle()
                     .fill(Color.clear)
                     .overlay(Circle().stroke(Theme.ink3, lineWidth: 1))
                     .frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(cleanName).font(Theme.value).foregroundColor(tab.busy ? Theme.ink3 : Theme.ink)
+                    Text(cleanName).font(Theme.value).foregroundColor(connectable ? Theme.ink : Theme.ink3)
                         .lineLimit(1).truncationMode(.middle)
-                    Text(tab.busy ? "\(tab.process) — busy" : tab.process)
+                    Text(tab.busy ? "\(tab.process) — running, reconnects with history" : tab.process)
                         .font(Theme.caption).foregroundColor(Theme.ink3)
                 }
                 Spacer()
-                Text(tab.busy ? "ctrl-c first" : "join")
+                Text(connectable ? (tab.busy ? "connect" : "join") : "ctrl-c first")
                     .font(Theme.caption)
-                    .foregroundColor(tab.busy ? Theme.ink3 : (hover ? Theme.ink2 : Theme.ink3))
+                    .foregroundColor(connectable ? (hover ? Theme.ink2 : Theme.ink3) : Theme.ink3)
             }
             .padding(.horizontal, Theme.Space.s3)
             .padding(.vertical, Theme.Space.s2)
-            .background(hover && !tab.busy ? Theme.hover : Color.clear)
+            .background(hover && connectable ? Theme.hover : Color.clear)
             .cornerRadius(Theme.rowRadius)
             .contentShape(Rectangle())
         }

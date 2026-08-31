@@ -309,6 +309,34 @@ async function main() {
     case 'haunt': { const id = rest[0]; if (!id) throw new UsageError('ghost haunt <pane-id>'); haunt(id); console.log(`🟣 haunting ${id}`); break; }
     case 'unhaunt': { const id = rest[0]; if (!id) throw new UsageError('ghost unhaunt <pane-id>'); unhaunt(id); console.log(`released ${id}`); break; }
     case 'haunts': { const list = readHaunted(); console.log(list.length ? 'haunting: ' + list.join(', ') : 'not haunting any panes'); break; }
+    // One-click adoption of a live Terminal.app tab (the menu bar's "connect"): idle tab →
+    // ghost join typed into it; running claude → Ctrl-C ×2, wait, join, relaunch the same
+    // command + --continue. The orchestration lives in src/adopt.mjs, fully dep-injected.
+    // Terminal.app tabs, for the menu bar's picker — AppleScript geometry merged with ps
+    // process chains (src/adopt.mjs listTabs). Empty list on a machine with no Terminal
+    // or no osascript, never a crash.
+    case 'tabs': {
+      const { options } = parseArgs(rest, [], ['--json']);
+      const { listTabs } = await import('../src/adopt.mjs');
+      const tabs = listTabs();
+      if (options.json) { console.log(JSON.stringify(tabs)); break; }
+      console.log(tabs.length
+        ? tabs.map(t => `${t.tty} ${t.busy ? '· busy' : '· idle'} [${t.processes.join(' ')}] ${t.windowName}`).join('\n')
+        : 'no Terminal tabs');
+      break;
+    }
+    case 'adopt': {
+      const tty = rest[0];
+      if (!tty) throw new UsageError('ghost adopt <tty>   (e.g. ghost adopt /dev/ttys001)');
+      const target = tty.startsWith('/dev/') ? tty : `/dev/${tty}`;
+      const { adoptTab, realAdoptDeps } = await import('../src/adopt.mjs');
+      const r = await adoptTab(target, realAdoptDeps());
+      if (!r.ok) { console.error(`ghost adopt: ${r.reason}`); process.exit(1); }
+      console.log(r.relaunched
+        ? `👻 adopted ${target} as "${r.joined}" — ${r.relaunched} restarted with --continue`
+        : `👻 adopted ${target} as "${r.joined}"`);
+      break;
+    }
     // The enrollment half of menu-bar driving: typed in any terminal, it wraps THAT
     // terminal in a named tmux session — same tab, now visible and driveable from the
     // dropdown. Driving stays tmux-only on purpose (send-keys + capture-pane is the whole
@@ -464,6 +492,7 @@ async function main() {
         '  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"',
         '  ghost drives [--json] | undrive <pane>       live drives · stop one',
         '  ghost join [name]                    make THIS terminal driveable',
+        '  ghost tabs [--json] | adopt <tty>    list Terminal tabs · connect one',
         '  ghost doctor                         check the environment is ready',
         '  ghost off | status | queue | report | logs [N]'].join('\n');
       // Bare `ghost` is a help request (exit 0); an actual unknown command is a usage

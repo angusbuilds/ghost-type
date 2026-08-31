@@ -205,52 +205,32 @@ final class GhostModel: ObservableObject {
     func listTerminalTabs(completion: @escaping ([TermTab]) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
-            let script = """
-            set out to ""
-            tell application "Terminal"
-              repeat with w in windows
-                set wid to id of w
-                set wname to name of w
-                set i to 0
-                repeat with t in tabs of w
-                  set i to i + 1
-                  set pstr to ""
-                  repeat with pp in (processes of t)
-                    set pstr to pstr & pp & ","
-                  end repeat
-                  set out to out & wid & "\\t" & i & "\\t" & tty of t & "\\t" & busy of t & "\\t" & pstr & "\\t" & wname & linefeed
-                end repeat
-              end repeat
-            end tell
-            return out
-            """
-            let raw = self.osascript(script)
-            let tabs: [TermTab] = raw.split(separator: "\n").compactMap { line in
-                let f = line.components(separatedBy: "\t")
-                guard f.count >= 6, let wid = Int(f[0]), let idx = Int(f[1]) else { return nil }
-                let procs = f[4].split(separator: ",").map(String.init)
-                // A tab already inside tmux is wrapped — it's either in the sessions list
-                // or one attach away; offering to join it again is noise.
-                if procs.contains("tmux") { return nil }
-                // The foreground chain for a claude tab reads login,-zsh,caffeinate,claude —
-                // name the tab by the agent the user thinks of it as, not its wrapper.
-                let agents = ["claude", "codex", "aider", "grok"]
-                let process = procs.last(where: { agents.contains($0.lowercased()) }) ?? procs.last ?? ""
-                return TermTab(windowId: wid, tabIndex: idx, tty: f[2], busy: f[3] == "true", process: process, windowName: f[5])
+            struct RawTab: Decodable {
+                let windowId: Int, tabIndex: Int, tty: String, busy: Bool
+                let processes: [String], windowName: String
+            }
+            let out = self.run(["tabs", "--json"])
+            let raw = out.data(using: .utf8).flatMap { try? JSONDecoder().decode([RawTab].self, from: $0) } ?? []
+            let agents = ["claude", "codex", "aider", "grok"]
+            let tabs = raw.map { r in
+                TermTab(windowId: r.windowId, tabIndex: r.tabIndex, tty: r.tty, busy: r.busy,
+                        process: r.processes.last(where: { agents.contains($0.lowercased()) }) ?? r.processes.last ?? "",
+                        windowName: r.windowName)
             }
             DispatchQueue.main.async { completion(tabs) }
         }
     }
 
-    func joinTerminalTab(_ tab: TermTab, completion: @escaping (Bool) -> Void) {
+    // The picker's connect action: adoption is orchestrated by `ghost adopt` in the tested
+    // Node layer (Ctrl-C, wait, join, relaunch --continue) — the app just asks and refreshes.
+    func adoptTab(tty: String, completion: @escaping (Bool) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
-            let script = "tell application \"Terminal\" to do script \"ghost join\" in tab \(tab.tabIndex) of window id \(tab.windowId)"
-            let out = self.osascript(script)
-            // give join a beat to create the session, then refresh picks it up
-            Thread.sleep(forTimeInterval: 0.8)
+            let out = self.run(["adopt", tty])
+            // Adoption ends with a relaunch that takes a beat; refresh after it settles.
+            Thread.sleep(forTimeInterval: 1.0)
             DispatchQueue.main.async {
-                completion(!out.isEmpty)   // do script echoes the tab reference on success, nothing on error
+                completion(out.contains("adopted"))
                 self.refresh()
             }
         }
