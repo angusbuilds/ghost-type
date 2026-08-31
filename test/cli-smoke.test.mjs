@@ -24,7 +24,7 @@ const CRASH = /at file:\/\/|at Object\.|ReferenceError|TypeError|is not defined|
 test('every read-only subcommand runs cleanly on a FRESH install (no ~/.ghosttype)', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-cli-'));
   try {
-    for (const cmd of ['status', 'queue', 'report', 'doctor', 'haunts', 'logs', 'sessions', '']) {
+    for (const cmd of ['status', 'queue', 'report', 'doctor', 'haunts', 'drives', 'logs', 'sessions', '']) {
       const { code, out } = runGhost(cmd ? [cmd] : [], home);
       assert.doesNotMatch(out, CRASH, `\`ghost ${cmd}\` crashed:\n${out}`);
       assert.equal(code, 0, `\`ghost ${cmd}\` exited ${code}:\n${out}`);
@@ -45,7 +45,7 @@ test('an unknown subcommand fails with a clean usage error (exit 2), not a crash
 test('a command needing an argument reports usage (exit 2) instead of throwing', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-cli-'));
   try {
-    for (const cmd of ['haunt', 'unhaunt', 'drive']) {   // all require a pane id (drive also a goal)
+    for (const cmd of ['haunt', 'unhaunt', 'drive', 'undrive']) {   // all require a pane id (drive also a goal)
       const { code, out } = runGhost([cmd], home);
       assert.doesNotMatch(out, CRASH, `\`ghost ${cmd}\` crashed:\n${out}`);
       assert.equal(code, 2, `\`ghost ${cmd}\` should be a usage error:\n${out}`);

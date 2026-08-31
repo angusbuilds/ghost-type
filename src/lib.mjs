@@ -51,26 +51,80 @@ export function writeJson(file, value) {
   }
 }
 
+// A held lock older than this is presumed abandoned by a crashed holder. Always compared
+// against this fixed ceiling, never against the WAITING caller's own attempts*waitMs — tying
+// reclaim to the waiter's own (possibly short, or simply exhausted-sooner) budget let it
+// delete a lock its rightful holder still legitimately held, e.g. mid a slow read-modify-
+// write (round-37 audit #3).
+const STALE_LOCK_MS = 5000;
+
 // Best-effort exclusive lock for the rare cross-PROCESS read-modify-write on a shared file — two
 // `ghost haunt` CLI invocations racing on haunted.json each read-then-write the whole list, so the
 // second writer clobbers the first (round 35). O_EXCL create is the lock; spin briefly; on timeout
 // PROCEED anyway — the guarded state is non-critical UI bookkeeping, so a rare lost update beats a hung
-// command. A lock older than the whole spin budget is reclaimed so a crashed holder can't wedge it
-// forever. writeJson already makes each individual write atomic; this serializes the RMW around it.
-export function withFileLock(target, fn, { attempts = 40, waitMs = 15 } = {}) {
+// command. A lock older than STALE_LOCK_MS is reclaimed so a crashed holder can't wedge it forever.
+// writeJson already makes each individual write atomic; this serializes the RMW around it.
+//
+// `strict: true` is the opt-in for callers whose correctness claim can't tolerate "proceed
+// anyway" — e.g. claimDrive's one-live-drive-per-pane guarantee. Once the normal spin budget
+// (attempts*waitMs) is exhausted without acquiring the lock, a strict caller keeps waiting
+// (still subject to the same STALE_LOCK_MS reclaim) instead of running fn() unguarded,
+// concurrently with whoever actually holds it.
+export function withFileLock(target, fn, { attempts = 40, waitMs = 15, staleMs = STALE_LOCK_MS, strict = false } = {}) {
   const lock = `${target}.lock`;
   try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch { /* dir exists */ }
   const sleep = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no SAB */ } };
+  // Ownership token — this process's pid plus a random suffix — written into the lock file
+  // the instant it's created. File age alone can't tell a crashed holder from one that's
+  // merely slow (e.g. mid a long fn() — see the STALE_LOCK_MS comment above), and stealing a
+  // still-live holder's lock let two callers run fn() concurrently, exactly what strict mode
+  // exists to prevent (round-40 audit #1). The token fixes both ends of that: staleness
+  // reclaim now checks whether the CURRENT holder's pid is actually still alive before ever
+  // deleting its lock, and release only ever deletes a lock file whose content still IS the
+  // token this process wrote — never whatever happens to be sitting at the lock path.
+  const token = `${process.pid}:${crypto.randomBytes(8).toString('hex')}`;
+  const isAlive = (pid) => {
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    try { process.kill(pid, 0); return true; }
+    catch (e) { return e.code === 'EPERM'; }   // exists but owned by another user — treat as alive
+  };
+  // Reclaim only a lock that is BOTH old enough AND whose recorded holder pid is no longer
+  // running — age alone (the old check) treated "slow" and "crashed" as indistinguishable.
+  const reclaimIfAbandoned = () => {
+    let mtimeMs;
+    try { mtimeMs = fs.statSync(lock).mtimeMs; } catch { return; }        // gone/raced
+    if (Date.now() - mtimeMs <= staleMs) return;
+    let content;
+    try { content = fs.readFileSync(lock, 'utf8'); } catch { return; }    // gone/raced
+    const holderPid = Number(content.split(':')[0]);
+    if (isAlive(holderPid)) return;                                      // slow, not crashed — never steal
+    // Compare-before-delete: only remove the file if its content hasn't changed since we
+    // inspected it, so a lock the real holder just released cleanly (or that a concurrent
+    // reclaimer already replaced) can't be deleted out from under its new, legitimate owner.
+    try { if (fs.readFileSync(lock, 'utf8') === content) fs.rmSync(lock, { force: true }); } catch { /* gone/raced */ }
+  };
+  const tryAcquire = () => {
+    try {
+      const fd = fs.openSync(lock, 'wx');   // wx = O_CREAT|O_EXCL — fails if held
+      try { fs.writeFileSync(fd, token); } finally { fs.closeSync(fd); }
+      return true;
+    } catch {
+      reclaimIfAbandoned();
+      return false;
+    }
+  };
   let held = false;
-  for (let i = 0; i < attempts; i++) {
-    try { fs.closeSync(fs.openSync(lock, 'wx')); held = true; break; }   // wx = O_CREAT|O_EXCL — fails if held
-    catch {
-      try { if (Date.now() - fs.statSync(lock).mtimeMs > attempts * waitMs) fs.rmSync(lock, { force: true }); } catch { /* gone/raced */ }
-      sleep(waitMs);
+  for (let i = 0; i < attempts && !held; i++) {
+    held = tryAcquire();
+    if (!held) sleep(waitMs);
+  }
+  while (strict && !held) { held = tryAcquire(); if (!held) sleep(waitMs); }
+  try { return fn(); }
+  finally {
+    if (held) {
+      try { if (fs.readFileSync(lock, 'utf8') === token) fs.rmSync(lock, { force: true }); } catch { /* best effort */ }
     }
   }
-  try { return fn(); }
-  finally { if (held) { try { fs.rmSync(lock, { force: true }); } catch { /* best effort */ } } }
 }
 
 export function log(entry) {

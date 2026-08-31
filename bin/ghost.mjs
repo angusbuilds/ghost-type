@@ -7,6 +7,8 @@
 //   ghost status                    show state + heartbeat
 //   ghost queue                     show tonight's planned cards
 //   ghost report                    print the latest morning report
+//   ghost sessions | haunt | unhaunt | drive | drives | undrive   live-terminal mode
+//   ghost doctor | logs [N]         environment check · recent log lines
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +37,7 @@ import { checkEnv, renderDoctor } from '../src/doctor.mjs';
 import { realOnBattery, realFreeDiskGB, realQuarantineBacklog } from '../src/daemon.mjs';
 import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
 import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
+import { claimDrive, clearDrive, liveDrives, stopDrive } from '../src/drives.mjs';
 
 const CONFIG = loadConfig();   // ~/.ghosttype/config.json merged over safe defaults
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version; } catch { return '0.0.0'; } })();
@@ -51,10 +54,20 @@ const has = (name) => rest.includes(name);
 // by a real value (not another flag, not the end); unknown flags are rejected. Throws a
 // UsageError the caller turns into a usage message + exit 2 — never silently mis-parses.
 class UsageError extends Error {}
-function parseArgs(argv, valueFlags = [], boolFlags = []) {
+// flagsFirst: for commands (`ghost drive`) whose trailing positionals are free prose — a
+// goal can legitimately contain '--' words ("--refactor the auth flow", "cap --max 5
+// retries"), so flag parsing stops at the FIRST positional (the pane id): everything after
+// it is goal text, verbatim, never an option. One rule replaces the freeTrailingText +
+// valueValidators machinery that grew across rounds 39-43 patching its own edge cases —
+// under that design a goal like "--max 5 alarms then stop" still silently became --max=5
+// plus a different goal, the exact class of bug it existed to prevent. Flags therefore go
+// BEFORE the pane id; the drive case adds one courtesy guard for the misplaced-flag typo.
+// Default false keeps strict fail-closed parsing for every other command (round-33 #3).
+function parseArgs(argv, valueFlags = [], boolFlags = [], { flagsFirst = false } = {}) {
   const options = {}; const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (flagsFirst && positionals.length > 0) { positionals.push(a); continue; }
     if (valueFlags.includes(a)) {
       const v = argv[i + 1];
       if (v === undefined || v.startsWith('--')) throw new UsageError(`${a} needs a value`);
@@ -295,10 +308,60 @@ async function main() {
     case 'haunt': { const id = rest[0]; if (!id) throw new UsageError('ghost haunt <pane-id>'); haunt(id); console.log(`🟣 haunting ${id}`); break; }
     case 'unhaunt': { const id = rest[0]; if (!id) throw new UsageError('ghost unhaunt <pane-id>'); unhaunt(id); console.log(`released ${id}`); break; }
     case 'haunts': { const list = readHaunted(); console.log(list.length ? 'haunting: ' + list.join(', ') : 'not haunting any panes'); break; }
+    // Live drives only — liveDrives() verifies each pid against the process table and heals
+    // dead entries out of the registry, so this output is truthful even after a SIGKILL.
+    case 'drives': {
+      const { options } = parseArgs(rest, [], ['--json']);
+      const live = liveDrives();
+      if (options.json) { console.log(JSON.stringify(live)); break; }
+      const ids = Object.keys(live);
+      console.log(ids.length
+        ? 'driving: ' + ids.map(id => `${id} (pid ${live[id].pid} → ${live[id].goal})`).join(', ')
+        : 'not driving any panes');
+      break;
+    }
+    case 'undrive': {
+      const { options, positionals } = parseArgs(rest, ['--pid'], []);
+      const id = positionals[0];
+      if (!id) throw new UsageError('ghost undrive <pane-id>');
+      // --pid is the menu-bar app's safety check at Quit: only SIGINT the drive if it's
+      // still the exact pid the app spawned, so a CLI drive that reuses the same pane id in
+      // the meantime can't be killed by an app instance that never touched it.
+      let expectedPid;
+      if (options.pid !== undefined) {
+        const n = Number(options.pid);
+        if (!Number.isInteger(n) || n <= 0) throw new UsageError('--pid must be a positive integer');
+        expectedPid = n;
+      }
+      const r = stopDrive(id, { expectedPid });
+      // SIGINT lets the drive run its own cleanup; unhaunt here too so a pane whose drive
+      // died uncleanly (SIGKILL, crash) still gets its tint healed. Both are idempotent.
+      // Skipped on a pid mismatch — the live drive there isn't the one --pid asked for, so
+      // untinting it would be touching a pane this call was never meant to affect.
+      if (!r.mismatch) { try { unhaunt(id); } catch { /* pane gone */ } }
+      console.log(r.stopped ? `stopping ${id} (pid ${r.pid})`
+        : r.mismatch ? `${id} is being driven, but not by pid ${expectedPid} — not stopping`
+        : `${id} is not being driven`);
+      break;
+    }
     case 'drive': {
-      const { options, positionals } = parseArgs(rest, ['--engine', '--max'], []);
+      // Flags before the pane id; everything after it is goal prose — see parseArgs's
+      // flagsFirst comment. A bare recognized flag token right after the pane id can only
+      // be a misplaced flag typed at a shell (the GUI sends the goal as ONE argv element),
+      // so it fails closed with placement guidance rather than silently driving toward
+      // flag-shaped prose or silently honoring a flag the contract says comes first.
+      const { options, positionals } = parseArgs(rest, ['--engine', '--max'], [], { flagsFirst: true });
       const paneId = positionals[0];
-      const goal = positionals.slice(1).join(' ');
+      // A bare recognized flag token ANYWHERE after the pane id is a misplaced flag typed at
+      // a shell (the GUI sends the goal as ONE argv element; quoted goals arrive the same
+      // way) — fail closed with placement guidance. Live-caught: an old-style trailing
+      // `--max 1` otherwise folds silently into the goal AND the cap silently stays default.
+      if (positionals.slice(1).some(t => ['--engine', '--max'].includes(t))) {
+        throw new UsageError(`flags go before the pane id: ghost drive [--engine claude|codex] [--max N] <pane-id> "<goal>"`);
+      }
+      // Trimmed, like `ghost on`'s goal normalization above — a whitespace-only goal must
+      // not slip through as "truthy" and claim/tint/drive a pane toward nothing (round-38 #2).
+      const goal = positionals.slice(1).join(' ').trim();
       if (!paneId || !goal) throw new UsageError('ghost drive <pane-id> "<goal>"');
       if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
       const engine = options.engine || CONFIG.defaultEngine;
@@ -308,12 +371,25 @@ async function main() {
         if (!Number.isInteger(m) || m <= 0) throw new UsageError('--max must be a positive integer');
         maxInjects = m;
       }
-      haunt(paneId);   // tint it purple while we drive
-      // M5: always release the tint/state — on normal return, exception, or Ctrl-C.
-      const cleanup = () => { try { unhaunt(paneId); } catch { /* pane gone */ } };
+      // One live drive per pane — the check and the registration must be a single atomic
+      // operation (claimDrive), or two `ghost drive` invocations racing on the same pane
+      // can both see it free before either has recorded (round-36 audit #5/#9/#14/#17).
+      const claim = claimDrive(paneId, { pid: process.pid, goal, engine });
+      if (!claim.claimed) throw new UsageError(`already driving ${paneId} (pid ${claim.existing.pid}) — ghost undrive ${paneId} first`);
+      // M5: always release the tint/state/registry — on normal return, exception, or Ctrl-C.
+      // clearDrive is pid-guarded, so a late cleanup can't deregister a successor drive.
+      const cleanup = () => {
+        try { unhaunt(paneId); } catch { /* pane gone */ }
+        try { clearDrive(paneId, { pid: process.pid }); } catch { /* best effort */ }
+      };
       process.once('SIGINT', () => { cleanup(); process.exit(130); });
       console.log(`🟣 driving ${paneId} toward: ${goal}  (ctrl-c to stop)`);
       try {
+        // Tinting now happens INSIDE the try, after the registry claim already succeeded —
+        // a throw here reaches `cleanup` instead of leaking a purple, unregistered pane
+        // with no cleanup path (round-36 audit #15; the old order tinted before `cleanup`
+        // even existed).
+        haunt(paneId);
         const driveDeps = { ...defaultDriveDeps({ engine }), humanThreshold: CONFIG.humanIdleThreshold };
         const out = await hauntDrive({ paneId, goal, deps: driveDeps, maxInjects, pollMs: CONFIG.pollMs, minStable: CONFIG.minStable });
         console.log(`\ndone: ${out.reason} · ${out.injects} prompt(s) injected`);
@@ -368,6 +444,7 @@ async function main() {
         '  ghost learn                          build your voice profile',
         '  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight',
         '  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"',
+        '  ghost drives [--json] | undrive <pane>       live drives · stop one',
         '  ghost doctor                         check the environment is ready',
         '  ghost off | status | queue | report | logs [N]'].join('\n');
       // Bare `ghost` is a help request (exit 0); an actual unknown command is a usage
