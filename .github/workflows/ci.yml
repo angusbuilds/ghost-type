@@ -1,9 +1,12 @@
 name: CI
 
+# Manual trigger only, deliberately: GitHub refuses to start Actions jobs on this
+# account's private repos ("spending limit / billing"), so a push trigger just paints
+# every commit with a red ✗ that says nothing about the code. Restore `push:` here if
+# the repo goes public or billing is enabled. The suite is `node --test` — offline,
+# zero tokens, and runs on every local change anyway.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:

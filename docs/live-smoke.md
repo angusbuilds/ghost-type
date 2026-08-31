@@ -111,3 +111,27 @@ not page bugs**, and you can ignore them:
   H.264 decoder, so it aborts the mp4. The file is valid H.264/AVC 1920×1080 and `ffmpeg
   -i hero.mp4 -f null -` decodes it end-to-end with zero errors; it plays in real
   Chrome/Safari. Confirm the codec with `ffprobe -show_entries stream=codec_name site/media/hero.mp4`.
+
+## 3. Menu-bar drive smoke (can be fully automated via Accessibility)
+
+Verified 2026-08-30 on a live system; repeatable without spending a token. Setup: a
+scratch pane whose foreground is neither shell nor agent, so the drive loop polls forever
+in the `working` state and never injects:
+
+```bash
+tmux new-session -d -s ghostcheck 'sleep 900'      # pane %N: cmd=sleep → drive never injects
+node bin/ghost.mjs drive --max 1 %N "wiring check" &
+```
+
+**Expect, in order** (each was AX-verified — `osascript` clicks on the status item and
+`AXPress` on the dropdown rows work when the terminal has Accessibility):
+
+1. `ghost drives --json` lists the pane; the pane tints purple; within ~4s the menu-bar
+   title shows the session name; the dropdown row reads **driving**.
+2. Clicking the driving row stops it: registry `{}`, tint back to `default`.
+3. Clicking the now-idle row opens the goal panel flush under the status item; typed
+   keystrokes land; Return spawns `ghost drive` **whose parent pid is the app**.
+4. Quitting the app kills only that app-spawned drive. A CLI-started drive survives the
+   quit (`drives --json` still lists it) and stops via `ghost undrive %N`.
+
+Cleanup: `ghost undrive %N && tmux kill-session -t ghostcheck`.

@@ -1,5 +1,23 @@
 # Decision needed: should the menu bar actually *drive*, or only *haunt*?
 
+## Resolved — 2026-08-30
+
+**Option A** shipped: a goal field, not B's "drive toward the armed send-off." One
+refinement — the field lives in a small borderless key `NSPanel` flush under the status
+item, not inside the tracking `NSMenu`: menus eat keystrokes for item navigation, a key
+panel types reliably. "Driving" in the UI is now backed by `src/drives.mjs`, a
+ps-verified registry of live drive processes, so the label this doc complained about is
+now truthful — for CLI-started drives too, and across app restarts. The CLI grew
+`ghost drives [--json]` (what the menu bar polls) and `ghost undrive <pane>`. Every item in
+the "When picked, the work is" list below is built and 418/418 tests green — including
+the final bullet, the live smoke: verified 2026-08-30 against a real tmux pane and the
+running app, driven end-to-end through the Accessibility API (real clicks, real
+keystrokes). Confirmed live: a CLI-started drive shows as "driving" in the dropdown and
+the menu-bar title with zero app involvement; clicking the driving row SIGINTs it (tint
+and registry clear); clicking an idle row opens the goal panel, typed text lands, Return
+spawns a detached drive whose parent is the app; quit stops app-spawned drives and leaves
+CLI-started ones running. See docs/live-smoke.md § menu-bar drive.
+
 This is the one genuinely-open item from the whole audit campaign (round 28 "#1").
 It needs a product call, not just wiring — so it's written up here rather than guessed.
 
@@ -52,6 +70,12 @@ proven. What remains is a UI decision that's Angus's to make.
 
 - Swift: add the goal affordance (B: read armed send-off from `state.json`; A: a text field).
 - Swift: spawn `ghost drive <pane> "<goal>"` **detached** (`Process` without `waitUntilExit`),
-  keep the PID, `terminate()` it on unhaunt/quit.
+  hold onto the `Process` and `terminate()` it directly on quit. **Not what shipped:**
+  `terminate()` would `SIGTERM` the drive and strand its tint + registry entry; the app
+  instead shells out to `ghost undrive <pane> --pid <p>` (`SIGINT`, handled by the drive's
+  own cleanup). The pid the app remembers is used only as a safety check, never to signal
+  the process directly — `ghost undrive` refuses to touch a pane unless the registry still
+  names that exact pid as the live drive there — see `Model.swift`'s
+  `startDrive`/`undrive`/`undriveBlocking`.
 - Relabel the row/panel: "driving" only when a drive process is actually live for that pane.
 - Verify manually against the `docs/live-smoke.md` gate (real pane, real session).

@@ -2,6 +2,55 @@
 
 All notable changes to Ghost Type. Dates are the day the work landed.
 
+## [0.2.0] — 2026-08-30
+
+The menu bar drives for real now — the one item the audit campaign deferred
+(`docs/menu-bar-drive-decision.md`, Option A: pick a session, type a goal in a panel under
+the status item, return starts a real drive).
+
+### The menu bar drives
+- **A real drive, not a wish** — click an idle session row and the menu closes; a small
+  borderless keyboard panel appears flush under the status item with a goal text field;
+  Return spawns a detached `ghost drive`, Escape or click-away cancels. Click a driving row
+  and it's an immediate `ghost undrive`, no panel.
+- **Headroom-style flush dropdown** — the status item click opens an `NSMenu` +
+  `NSHostingView` sitting flush under the menu bar, no gap, no arrow — replaces the old
+  `NSPopover`. The hero numeral is the count of sessions currently in the list that are also
+  live-driving — not the raw live-drive count, so a pane that just closed but whose drive
+  process hasn't noticed yet can't make the numeral disagree with the row list below it; each
+  session row shows the violet dot + "driving" only when `ghost drives --json` actually lists
+  it, so the state is truthful for CLI-started drives and survives an app restart.
+- **Quit is scoped** — stops only the drives the app itself spawned; a drive started from
+  the CLI keeps running.
+- Haunt-only tinting is out of the UI (the CLI keeps `ghost haunt`/`ghost unhaunt`).
+
+### A verified-process fact, not a UI flag
+- **New `src/drives.mjs`** — a drive registry at `~/.ghosttype/drives.json` mapping
+  `paneId -> {pid, goal, engine, startedAt}`. `liveDrives()` checks each pid against the
+  real process table: it finds the `drive` token in that pid's `ps` argv, skips any
+  `--engine`/`--max` flag+value pair, and requires the very next token to equal the paneId
+  exactly — not a substring/containment check, so a stale entry for `%1` can't match a live
+  `%12`, and a paneId that only happens to appear inside another drive's free-text goal can't
+  be mistaken for the real positional — and heals dead entries out of the file as it goes, so
+  a killed drive can't wedge into permanent "driving." `stopDrive()` only `SIGINT`s a pid it
+  has just verified is live — pid reuse can't hijack it.
+- **`ghost drive <pane> "<goal>"` refuses a double-drive** — a pane that's already live
+  exits 2 with `usage: already driving %N (pid P) — ghost undrive %N first`. It registers on start
+  and always deregisters, on both the normal exit path and `SIGINT`, pid-guarded so it never
+  clears someone else's entry.
+- **New `ghost drives [--json]`** — lists live drives; `--json` prints
+  `{"%3":{"pid":123,"goal":"...","engine":"claude","startedAt":"..."}}`, exactly the shape
+  the menu bar polls.
+- **New `ghost undrive <pane>`** — `SIGINT`s the live drive (its own handler untints and
+  deregisters) and also unhaunts directly, so it heals a stale tint left by an uncleanly
+  killed drive; prints `stopping %3 (pid 123)` or `%3 is not being driven`.
+- `ghost sessions --json` rows now carry `paneId`, `session`, `loc`, `cmd`, `windowName`,
+  `title`, `target` — what the menu bar needs to render and target a row.
+
+### CI
+- Switched to `workflow_dispatch` — push-triggered runs on a private repo hit Actions
+  billing and sat as a permanent red ✗ that said nothing about the code.
+
 ## [0.1.0] — 2026-08-21
 
 The first end-to-end version: it can keep a coding agent working overnight and write the

@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-378%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-418%20passing-brightgreen">
   <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A526-blue">
   <img alt="deps" src="https://img.shields.io/badge/runtime%20deps-0-blueviolet">
   <img alt="engines" src="https://img.shields.io/badge/engines-Claude%20%2B%20Codex-8b5cf6">
@@ -22,12 +22,17 @@ night: every time the agent stops, Ghost Type writes the **next** prompt — phr
 test actually passes. In the morning you get branches to review, not an empty terminal.
 
 <p align="center">
+  <!-- TODO(round-36 audit #25): assets/menu-bar-app.png still shows the pre-rewrite
+       haunt-only popover (no goal field, "haunt" label) — regenerate against the rebuilt
+       dropdown/goal panel (queued as the live-verify step) before restoring alt text that
+       describes the drive flow. -->
   <img src="assets/menu-bar-app.png" width="360" alt="GhostType menu-bar app — pick a session and it turns purple to mark it">
 </p>
 
-It ships as a native macOS **menu-bar app**: pick a terminal session and that pane turns purple
-to mark it. The prompt-injection loop runs via `ghost drive <pane> "<goal>"`; or drive everything
-headless from the `ghost` CLI.
+It ships as a native macOS **menu-bar app**: pick a terminal session, give it a goal, and a real
+`ghost drive` loop starts on it — the row reads **"driving"** only while a verified-live drive
+process backs it, true across app restarts. Or skip the app and drive everything headless from
+the `ghost` CLI.
 
 ## The gap it fills
 
@@ -93,7 +98,7 @@ A hand-built explainer with cinematic clips (generated via Higgsfield) lives in
 ```bash
 git clone https://github.com/hangryclaude/ghost-type
 cd ghost-type
-node --test          # 378 tests, all offline — spends no tokens
+node --test          # 418 tests, all offline — spends no tokens
 ```
 
 Run one real card end-to-end against a scratch repo (this is the live smoke test):
@@ -135,7 +140,7 @@ Small, single-responsibility Node ESM modules — no framework, no dependencies,
 | `voice.mjs` / `transcript.mjs` | Learn your prompting voice from your real `~/.claude` history |
 | `drive.mjs` / `haunt.mjs` / `sessions.mjs` | Haunt mode: pick a live pane, tint it, inject the next prompt |
 | `report.mjs` | Morning report: status strip first, detail collapsed |
-| `app/GhostType` | Native macOS menu-bar app (Swift/AppKit + SwiftUI) |
+| `app/GhostType` | Native macOS menu-bar app (Swift/AppKit + SwiftUI) — drives sessions via the `drives.mjs` registry |
 
 Every untrusted input (diffs, test output, transcripts) is **secret-scrubbed, byte-capped,
 and fenced as data-not-instructions** before it reaches a prompt — because a transcript
@@ -161,11 +166,19 @@ ghost off | status | queue | report
 ghost sessions                  # list your tmux panes (agents first)
 ghost haunt <pane> / unhaunt <pane>     # tint a pane purple / release it (marks it, does not drive)
 ghost drive <pane> "<goal>"     # watch it; type the next prompt when it goes idle
+ghost drives [--json] / undrive <pane>  # list live drives · stop one
 ```
 
-The menu-bar app currently drives haunt *selection* — it tints a pane and marks it haunted. The
-injection loop itself runs via `ghost drive <pane> "<goal>"` (it needs a goal). Auto-launching the
-driver from a menu-bar click is a planned app enhancement (it needs a goal-input step first).
+The menu-bar app drives now, not just marks: pick an idle session, type a goal, and it spawns a
+real `ghost drive <pane> "<goal>"` loop — the row reads **"driving"** only while `ghost drives`
+confirms a live process behind it, true for app-started and CLI-started drives alike.
+
+`ghost drives [--json]` lists every live drive — pid, goal, engine, start time — each verified
+against the process table, not just the registry file; a dead entry heals itself out.
+`ghost undrive <pane>` stops one: it `SIGINT`s the live process (which untints and deregisters
+itself on the way out) and also unhaunts directly, so it heals a stale tint even after an
+uncleanly-killed drive. A pane already driving refuses a second `ghost drive` outright — exit 2,
+`usage: already driving %N (pid P) — ghost undrive %N first` — one live drive per pane, always.
 
 Tunables (token cap, hard-stop hour, thresholds) live in `~/.ghosttype/config.json` —
 see [`examples/config.example.json`](examples/config.example.json). The native menu-bar app
@@ -184,10 +197,10 @@ battery or low disk, so a sleeping laptop is a no-op.
 ✅  voice builder     learns your real prompting voice (lowercase, no "!", keeps your typos)
 ✅  the daemon        arm checks · planner · dossiers · caffeinate + heartbeat lifecycle
 ✅  two engines       Claude Code AND Codex, each prompted the way it likes
-✅  haunt mode        select a terminal from the menu bar → it turns purple → it drives it
+✅  menu-bar driving  pick a session in the menu bar → give it a goal → a verified-live drive runs it
 ✅  report            theme-aware HTML · morning push notification · prompt lineage
 
-378 tests, all offline (`node --test`) · independently audited by Codex (gpt-5.6-sol, xhigh) and by a parallel multi-agent sweep — every finding fixed
+418 tests, all offline (`node --test`) · independently audited by Codex (gpt-5.6-sol, xhigh) and by a parallel multi-agent sweep — every finding fixed
 ```
 
 Ghost Type never trusts a "done" claim — it re-runs the test itself and flags a
