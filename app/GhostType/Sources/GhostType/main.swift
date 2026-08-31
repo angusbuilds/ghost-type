@@ -350,14 +350,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = main
     }
 
-    // A small solid dot — violet when driving, dim when idle. Replaces the emoji.
-    private func dot(_ color: NSColor, size: CGFloat = 8) -> NSImage {
-        let img = NSImage(size: NSSize(width: size, height: size))
-        img.lockFocus()
-        color.setFill()
-        NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: size, height: size)).fill()
-        img.unlockFocus()
-        img.isTemplate = false
+    // The ghost itself, drawn as a menu-bar glyph. As a TEMPLATE image at idle, macOS
+    // paints it white on a dark bar and black on a light one — the old 8px
+    // tertiaryLabelColor dot was dark-gray-on-black on a dark menu bar, i.e. invisible,
+    // which read as "the app didn't open". Driving keeps the one violet accent.
+    private func ghostGlyph(_ color: NSColor, template: Bool) -> NSImage {
+        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            let p = NSBezierPath()
+            p.windingRule = .evenOdd
+            // body: flat sides, domed top, three scallops along the bottom hem
+            p.move(to: NSPoint(x: 2, y: 3.2))
+            p.line(to: NSPoint(x: 2, y: 9))
+            p.appendArc(withCenter: NSPoint(x: 9, y: 9), radius: 7, startAngle: 180, endAngle: 0, clockwise: false)
+            p.line(to: NSPoint(x: 16, y: 3.2))
+            p.appendArc(withCenter: NSPoint(x: 13.7, y: 3.2), radius: 2.3, startAngle: 0, endAngle: 180, clockwise: true)
+            p.appendArc(withCenter: NSPoint(x: 9, y: 3.2), radius: 2.3, startAngle: 0, endAngle: 180, clockwise: false)
+            p.appendArc(withCenter: NSPoint(x: 4.3, y: 3.2), radius: 2.3, startAngle: 0, endAngle: 180, clockwise: true)
+            p.close()
+            // eyes + the cursor mouth, punched out by the even-odd rule
+            p.appendOval(in: NSRect(x: 4.9, y: 8.6, width: 3.0, height: 3.0))
+            p.appendOval(in: NSRect(x: 10.1, y: 8.6, width: 3.0, height: 3.0))
+            p.appendRect(NSRect(x: 8.2, y: 4.4, width: 1.6, height: 2.8))
+            color.setFill()
+            p.fill()
+            return true
+        }
+        img.isTemplate = template
         return img
     }
 
@@ -400,11 +418,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .sorted { (model.liveDriving[$0.paneId]?.startedAt ?? "") > (model.liveDriving[$1.paneId]?.startedAt ?? "") }
         if let first = driven.first {
             let extra = driven.count > 1 ? " +\(driven.count - 1)" : ""
-            button.image = dot(violetNS)
+            button.image = ghostGlyph(violetNS, template: false)
             button.imagePosition = .imageLeading
             button.title = " \(first.name)\(extra)"
         } else {
-            button.image = dot(.tertiaryLabelColor)
+            button.image = ghostGlyph(.black, template: true)
             button.imagePosition = .imageOnly
             button.title = ""
         }
