@@ -40,7 +40,7 @@ final class TerminalPickerController: NSObject {
     }
 
     private func present(tabs: [TermTab], near button: NSStatusBarButton) {
-        let width: CGFloat = 360
+        let width: CGFloat = 390
         let content = TerminalPickerView(
             tabs: tabs,
             onPick: { [weak self] tab in self?.join(tab) },
@@ -143,7 +143,7 @@ struct TerminalPickerView: View {
         }
         .padding(.horizontal, Theme.margin)
         .padding(.vertical, Theme.Space.s3)
-        .frame(width: 360)
+        .frame(width: 390)
         .background(VisualEffect(material: .menu).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)))
     }
 }
@@ -228,7 +228,8 @@ struct TermTabRow: View {
                     .frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cleanName).font(Theme.value).foregroundColor(connectable ? Theme.ink : Theme.ink3)
-                        .lineLimit(1).truncationMode(.tail)
+                        .lineLimit(2).truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("\(tab.process) · \(shortTty)")
                         .font(Theme.caption).foregroundColor(Theme.ink3)
                         .lineLimit(1)
