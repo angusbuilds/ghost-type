@@ -256,6 +256,24 @@ final class GhostModel: ObservableObject {
         try? p.run()
     }
 
+    // `ghost run` — a NEW background terminal + agent + drive, no existing tab needed.
+    // Detached like adopt: the CLI waits for the agent to boot (seconds), and the session
+    // simply appears in the list on the refresh cadence once it's real.
+    func spawnGhostRun(project: String, goal: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: node)
+        var args = nodeIsEnvWrapper ? ["node", ghost, "run"] : [ghost, "run"]
+        args += ["--project", project, goal]
+        p.arguments = args
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
+        p.environment = env
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+    }
+
     func undrive(_ paneId: String, expectedPid: Int32? = nil) {
         queue.async { [weak self] in
             var args = ["undrive", paneId]

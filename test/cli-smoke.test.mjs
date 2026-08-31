@@ -45,7 +45,7 @@ test('an unknown subcommand fails with a clean usage error (exit 2), not a crash
 test('a command needing an argument reports usage (exit 2) instead of throwing', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gt-cli-'));
   try {
-    for (const cmd of ['haunt', 'unhaunt', 'drive', 'undrive']) {   // all require a pane id (drive also a goal)
+    for (const cmd of ['haunt', 'unhaunt', 'drive', 'undrive', 'run', 'open']) {   // all require a pane id (drive also a goal)
       const { code, out } = runGhost([cmd], home);
       assert.doesNotMatch(out, CRASH, `\`ghost ${cmd}\` crashed:\n${out}`);
       assert.equal(code, 2, `\`ghost ${cmd}\` should be a usage error:\n${out}`);

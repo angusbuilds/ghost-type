@@ -53,6 +53,7 @@ struct VisualEffect: NSViewRepresentable {
 struct GhostPanel: View {
     @ObservedObject var model: GhostModel
     let onSelect: (Session) -> Void
+    let onRun: () -> Void
     let onAddTerminal: () -> Void
     let onRefresh: () -> Void
     let onReport: () -> Void
@@ -129,6 +130,7 @@ struct GhostPanel: View {
     // Native controls, glyph + word — Headroom's footer idiom, not hand-rolled text buttons.
     private var footer: some View {
         HStack(spacing: Theme.Space.s1) {
+            control("Run", "play.fill") { onRun() }
             control("Refresh", "arrow.clockwise") { onRefresh() }
             control("Report", "doc.text") { onReport() }
             Spacer(minLength: Theme.Space.s2)
@@ -465,6 +467,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let host = NSHostingView(rootView: GhostPanel(
             model: model,
             onSelect: { [weak self] session in self?.selected(session) },
+            onRun: { [weak self] in
+                guard let self else { return }
+                self.dismissDropdown()
+                if let button = self.statusItem.button { self.goalPanel.showRun(near: button) }
+            },
             onAddTerminal: { [weak self] in
                 guard let self else { return }
                 self.dismissDropdown()

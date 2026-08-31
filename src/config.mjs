@@ -18,6 +18,7 @@ export const DEFAULTS = {
   pollMs: 5000,                // haunt-drive poll interval
   minStable: 2,                // consecutive stable polls before a pane counts as idle
   defaultEngine: 'claude',
+  agentCommand: 'claude',   // what `ghost run` types into the fresh session to boot the agent
   sandbox: false,              // macOS OS-sandbox: confine coding writes to the clone + deny network in acceptance (for untrusted repos)
 };
 
@@ -39,6 +40,7 @@ const VALIDATORS = {
   pollMs: v => int(v) && v >= 250 && v <= 600_000,
   minStable: v => int(v) && v >= 2,                      // a single stable pair is too weak a signal
   defaultEngine: v => v === 'claude' || v === 'codex',
+  agentCommand: v => typeof v === 'string' && v.trim().length > 0 && !v.includes('\n'),
   sandbox: v => typeof v === 'boolean',
 };
 

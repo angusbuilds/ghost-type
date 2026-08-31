@@ -39,6 +39,7 @@ import { realOnBattery, realFreeDiskGB, realQuarantineBacklog } from '../src/dae
 import { haunt, unhaunt, readHaunted } from '../src/haunt.mjs';
 import { hauntDrive, defaultDriveDeps } from '../src/drive.mjs';
 import { claimDrive, clearDrive, liveDrives, stopDrive } from '../src/drives.mjs';
+import { runInBackground, realRunDeps, openInTerminal } from '../src/run.mjs';
 
 const CONFIG = loadConfig();   // ~/.ghosttype/config.json merged over safe defaults
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url))).version; } catch { return '0.0.0'; } })();
@@ -325,6 +326,37 @@ async function main() {
         : 'no Terminal tabs');
       break;
     }
+    // Driving with NO existing terminal: a detached tmux session is created in the project
+    // dir, the agent boots inside it, and a detached drive takes over. Survives every
+    // window closing; `ghost open <session>` attaches a Terminal window for peeking.
+    case 'run': {
+      const { options, positionals } = parseArgs(rest, ['--engine', '--project', '--dir', '--cmd'], [], { flagsFirst: true });
+      if (positionals.length && ['--engine', '--project', '--dir', '--cmd'].includes(positionals[0])) {
+        throw new UsageError('flags go before the goal: ghost run [--project P|--dir D] [--engine E] "<goal>"');
+      }
+      const goal = positionals.join(' ').trim();
+      if (!goal) throw new UsageError('ghost run [--project P|--dir D] "<goal>"');
+      if (options.engine !== undefined && !['claude', 'codex'].includes(options.engine)) throw new UsageError('--engine must be claude or codex');
+      const engine = options.engine || CONFIG.defaultEngine;
+      let dir = process.cwd();
+      if (options.dir) dir = path.resolve(options.dir);
+      else if (options.project) dir = path.join(DEV_ROOT, options.project);
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new UsageError(`no such project directory: ${dir}`);
+      const agentCommand = options.cmd || CONFIG.agentCommand;
+      console.log(`👻 starting ${engine} in a background terminal for ${path.basename(dir)}…`);
+      const r = await runInBackground({ dir, goal, engine, agentCommand }, realRunDeps({ ghostBin: process.argv[1] }));
+      if (!r.ok) { console.error(`ghost run: ${r.reason}`); process.exit(1); }
+      console.log(`🟣 running — session "${r.session}" (${r.paneId}) is being driven toward: ${goal}`);
+      console.log(`   watch it any time:  ghost open ${r.session}`);
+      break;
+    }
+    case 'open': {
+      const name = rest[0];
+      if (!name) throw new UsageError('ghost open <session>');
+      openInTerminal(name);
+      console.log(`opening a Terminal window attached to "${name}"`);
+      break;
+    }
     case 'adopt': {
       const tty = rest[0];
       if (!tty) throw new UsageError('ghost adopt <tty>   (e.g. ghost adopt /dev/ttys001)');
@@ -496,6 +528,7 @@ async function main() {
         '  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight',
         '  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"',
         '  ghost drives [--json] | undrive <pane>       live drives · stop one',
+        '  ghost run [--project P] "<goal>" | open <s>  drive in a BACKGROUND terminal · peek at it',
         '  ghost join [name]                    make THIS terminal driveable',
         '  ghost tabs [--json] | adopt <tty>    list Terminal tabs · connect one',
         '  ghost doctor                         check the environment is ready',

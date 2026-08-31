@@ -66,6 +66,8 @@ final class GoalPanelController: NSObject {
     // that drive and nothing else. A pane-only cancel could SIGINT a CLI drive that won the
     // claim race instead (codex round-44 swift#3).
     private var launchedPidForCancel: Int32?
+    // Run mode: no pane — submit parses "project: goal" and spawns a fresh background run.
+    private var runMode = false
     private let model: GhostModel
     // Fires the instant the child process exists, so the app can register it as its own
     // before waiting to learn whether the drive actually took (round-39 audit #1).
@@ -78,8 +80,19 @@ final class GoalPanelController: NSObject {
         self.onSpawned = onSpawned
     }
 
+    // The Run control's face: same panel, no pane behind it. "project: goal" in one line —
+    // the project half must be a directory under ~/dev.
+    func showRun(near button: NSStatusBarButton) {
+        let fake = Session(paneId: "", session: "", cmd: "", target: "run", windowName: "", title: "")
+        show(for: fake, near: button)
+        runMode = true
+        caption?.stringValue = "run in a background terminal"
+        field?.placeholderString = "project: goal   — e.g.  gallery: make the tests pass"
+    }
+
     func show(for session: Session, near button: NSStatusBarButton) {
         dismiss()
+        runMode = false
         paneId = session.paneId
 
         let width: CGFloat = 300
@@ -208,6 +221,24 @@ final class GoalPanelController: NSObject {
     }
 
     @objc private func submit(_ sender: Any?) {
+        if runMode {
+            guard let text = field?.stringValue else { return }
+            let parts = text.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+                caption?.textColor = .systemRed
+                caption?.stringValue = "format:  project: goal"
+                return
+            }
+            caption?.textColor = .labelColor.withAlphaComponent(0.48)
+            caption?.stringValue = "starting in a background terminal…"
+            model.spawnGhostRun(project: parts[0], goal: parts[1])
+            let myGen = generation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self, self.generation == myGen else { return }
+                self.dismiss()
+            }
+            return
+        }
         guard !submitting, let pid = paneId, let text = field?.stringValue else { return }
         let goal = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goal.isEmpty else { return }   // ignore empty submit — leave the panel open

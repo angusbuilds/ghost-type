@@ -1,17 +1,17 @@
 {
-  "_comment": "Copy to ~/.ghosttype/config.json. All keys optional — omitted keys use the safe defaults. A value that fails its range is ignored (the default is kept), so a typo can never silently loosen a safety limit.",
+  "_comment": "Copy to ~/.ghosttype/config.json. All keys optional \u2014 omitted keys use the safe defaults. A value that fails its range is ignored (the default is kept), so a typo can never silently loosen a safety limit.",
   "_ranges": {
-    "maxTokensNight": "positive number — hard nightly token ceiling",
-    "maxCostUsd": "positive number — hard nightly dollar ceiling (the overnight-bill kill-switch)",
-    "nightDeadlineHour": "integer 0-23 — local hour the night hard-stops",
-    "maxConsecErrors": "integer >= 1 — consecutive engine errors before the breaker trips",
-    "humanIdleThreshold": "number >= 5 — seconds of no input before haunt-drive may type (a lower value is rejected: 0 would let a failed idle probe look idle and type over a present human)",
-    "maxCards": "integer >= 1 — cards per arm when no single project is named",
-    "backpressureThreshold": "integer >= 1 — unmerged ghost/* branches before a project is paused",
-    "pollMs": "integer 250-600000 — haunt-drive poll interval",
-    "minStable": "integer >= 2 — consecutive stable polls before a pane counts as idle",
+    "maxTokensNight": "positive number \u2014 hard nightly token ceiling",
+    "maxCostUsd": "positive number \u2014 hard nightly dollar ceiling (the overnight-bill kill-switch)",
+    "nightDeadlineHour": "integer 0-23 \u2014 local hour the night hard-stops",
+    "maxConsecErrors": "integer >= 1 \u2014 consecutive engine errors before the breaker trips",
+    "humanIdleThreshold": "number >= 5 \u2014 seconds of no input before haunt-drive may type (a lower value is rejected: 0 would let a failed idle probe look idle and type over a present human)",
+    "maxCards": "integer >= 1 \u2014 cards per arm when no single project is named",
+    "backpressureThreshold": "integer >= 1 \u2014 unmerged ghost/* branches before a project is paused",
+    "pollMs": "integer 250-600000 \u2014 haunt-drive poll interval",
+    "minStable": "integer >= 2 \u2014 consecutive stable polls before a pane counts as idle",
     "defaultEngine": "\"claude\" or \"codex\"",
-    "sandbox": "boolean — macOS OS-sandbox for UNTRUSTED repos: confines the coding session's writes to the clone AND denies network in acceptance tests (breaks tests/work that need the network or write outside the clone)"
+    "sandbox": "boolean \u2014 macOS OS-sandbox for UNTRUSTED repos: confines the coding session's writes to the clone AND denies network in acceptance tests (breaks tests/work that need the network or write outside the clone)"
   },
   "maxTokensNight": 2000000,
   "maxCostUsd": 10,
@@ -23,5 +23,7 @@
   "pollMs": 5000,
   "minStable": 2,
   "defaultEngine": "claude",
-  "sandbox": false
+  "sandbox": false,
+  "agentCommand": "claude",
+  "_agentCommand": "What `ghost run` types into the fresh background session to boot the agent \u2014 your alias or flags belong here, e.g. \"claude --dangerously-skip-permissions\"."
 }
