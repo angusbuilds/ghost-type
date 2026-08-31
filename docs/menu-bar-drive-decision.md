@@ -9,7 +9,7 @@ panel types reliably. "Driving" in the UI is now backed by `src/drives.mjs`, a
 ps-verified registry of live drive processes, so the label this doc complained about is
 now truthful — for CLI-started drives too, and across app restarts. The CLI grew
 `ghost drives [--json]` (what the menu bar polls) and `ghost undrive <pane>`. Every item in
-the "When picked, the work is" list below is built and 418/418 tests green — including
+the "When picked, the work is" list below is built and the full suite is green (the README badge carries the count) — including
 the final bullet, the live smoke: verified 2026-08-30 against a real tmux pane and the
 running app, driven end-to-end through the Accessibility API (real clicks, real
 keystrokes). Confirmed live: a CLI-started drive shows as "driving" in the dropdown and

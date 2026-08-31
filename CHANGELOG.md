@@ -239,3 +239,8 @@ parent dir, gitlink; nested untracked repos; non-ignored empty dirs git can't st
   background as intended (an integration test drives the real command, not a mock).
 - Independently audited by Codex (`gpt-5.6-sol`, xhigh) across twenty-eight rounds — each round
   verifying the prior round's fixes held and were complete, not just plausible.
+
+[0.2.3]: https://github.com/hangryclaude/ghost-type/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/hangryclaude/ghost-type/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/hangryclaude/ghost-type/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/hangryclaude/ghost-type/releases/tag/v0.2.0

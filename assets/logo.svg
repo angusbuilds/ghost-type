@@ -1,0 +1,36 @@
+<svg width="620" height="120" viewBox="0 0 620 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- ghost glyph: sheet ghost with a blinking-cursor mouth — it types, after all -->
+  <g transform="translate(10,8)">
+    <path d="M52 4
+             C 24 4, 8 26, 8 52
+             L 8 96
+             C 8 100, 13 102, 16 99
+             L 24 91
+             C 26 89, 30 89, 32 91
+             L 40 99
+             C 42 101, 46 101, 48 99
+             L 52 95
+             L 56 99
+             C 58 101, 62 101, 64 99
+             L 72 91
+             C 74 89, 78 89, 80 91
+             L 88 99
+             C 91 102, 96 100, 96 96
+             L 96 52
+             C 96 26, 80 4, 52 4 Z"
+          fill="#8B5CF6" opacity="0.92"/>
+    <circle cx="38" cy="46" r="6.5" fill="#0d1117"/>
+    <circle cx="66" cy="46" r="6.5" fill="#0d1117"/>
+    <!-- the cursor mouth -->
+    <rect x="44" y="62" width="7" height="16" rx="1.5" fill="#0d1117">
+      <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.5;0.55;0.95;1" dur="1.6s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+  <!-- wordmark -->
+  <text x="132" y="66" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="46" font-weight="700" letter-spacing="1">
+    <tspan fill="#8B5CF6">ghost</tspan><tspan fill="#8b949e"> type</tspan>
+  </text>
+  <text x="134" y="96" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="15" fill="#8b949e" letter-spacing="0.5">the agent keeps working · the prompts stay yours</text>
+</svg>
