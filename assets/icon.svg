@@ -1,0 +1,47 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- macOS app icon: dark squircle, the ghost glowing at its center -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#2b2144"/>
+      <stop offset="55%" stop-color="#1a1530"/>
+      <stop offset="100%" stop-color="#100d1d"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.55"/>
+      <stop offset="70%" stop-color="#8B5CF6" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#7c4dee"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <circle cx="512" cy="490" r="360" fill="url(#halo)"/>
+
+  <!-- the ghost, scaled 4.6x from the wordmark glyph, centered -->
+  <g transform="translate(512,470) scale(4.6) translate(-52,-52)">
+    <path d="M52 4
+             C 24 4, 8 26, 8 52
+             L 8 96
+             C 8 100, 13 102, 16 99
+             L 24 91
+             C 26 89, 30 89, 32 91
+             L 40 99
+             C 42 101, 46 101, 48 99
+             L 52 95
+             L 56 99
+             C 58 101, 62 101, 64 99
+             L 72 91
+             C 74 89, 78 89, 80 91
+             L 88 99
+             C 91 102, 96 100, 96 96
+             L 96 52
+             C 96 26, 80 4, 52 4 Z"
+          fill="url(#body)"/>
+    <circle cx="38" cy="46" r="6.5" fill="#14101f"/>
+    <circle cx="66" cy="46" r="6.5" fill="#14101f"/>
+    <rect x="44" y="62" width="7" height="16" rx="1.5" fill="#14101f"/>
+  </g>
+</svg>

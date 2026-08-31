@@ -25,9 +25,7 @@ night: every time the agent stops, Ghost Type writes the **next** prompt — phr
 test actually passes. In the morning you get branches to review, not an empty terminal.
 
 <p align="center">
-  <!-- capture note: regenerate against the current dropdown (driving row + add-a-terminal
-       row visible) — the committed shot must always match the shipped UI -->
-  <img src="assets/menu-bar-app.png" width="360" alt="The Ghost Type dropdown — sessions with a violet driving row">
+  <img src="assets/hero.jpg" width="820" alt="2am: a translucent violet ghost types at a glowing terminal while its human sleeps on the couch — the cat has opinions">
 </p>
 
 It also ships as a native macOS **menu-bar app** for daytime: pick a terminal, give it a
@@ -137,6 +135,12 @@ session that *tries* a blocked action — if your machine's guardrails don't sto
 Ghost Type refuses to arm. (See [`docs/live-smoke.md`](docs/live-smoke.md).)
 
 ## The live plane
+
+<p align="center">
+  <!-- capture note: regenerate against the current dropdown (driving row + add-a-terminal
+       row visible) — the committed shot must always match the shipped UI -->
+  <img src="assets/menu-bar-app.png" width="330" alt="The Ghost Type dropdown — sessions with a violet driving row">
+</p>
 
 How a terminal becomes driveable, and why the "driving" label can't lie:
 

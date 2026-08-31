@@ -6,6 +6,8 @@
 	<string>Ghost Type</string>
 	<key>CFBundleExecutable</key>
 	<string>GhostType</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.ghosttype.menubar</string>
 	<key>CFBundleName</key>
