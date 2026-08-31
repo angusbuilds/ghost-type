@@ -275,6 +275,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // than one per pane costs nothing: `ghost undrive --pid` refuses unless it's still the
     // exact live drive there.
     private var appSpawnedPaneIds: [String: Set<Int32>] = [:]
+    // When each app-spawned pid launched — a just-born child isn't registry-visible yet,
+    // and the periodic prune must not disown it before it can claim (round-44 swift#4).
+    private var pidLaunchDates: [Int32: Date] = [:]
     private let violetNS = NSColor(red: 0.545, green: 0.361, blue: 0.965, alpha: 1)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -295,7 +298,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // doc for why (round-39 audit #1). Inserted into the per-pane set, never assigned
             // outright — see appSpawnedPaneIds' own doc comment for why overwriting is unsafe
             // (round-42 audit #1).
-            self?.appSpawnedPaneIds[paneId, default: []].insert(pid)
+            // Synchronous hop: Quit reads this state on main the instant it fires — an
+            // async insert could lose the race and orphan a drive (round-44 swift#4).
+            DispatchQueue.main.sync {
+                self?.appSpawnedPaneIds[paneId, default: []].insert(pid)
+                self?.pidLaunchDates[pid] = Date()
+            }
         }, onSpawned: { [weak self] in
             self?.model.refresh()
         })
@@ -316,7 +324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // typing — reported live as "a glitch while I'm typing"). NSApp.isActive separates
         // the two: a user double-click activates the app, a background launch doesn't.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            if NSApp.isActive { self?.showDropdown() }
+            // keyWindow nil too: the user may have raced ahead into the goal panel, whose
+            // own activation would otherwise satisfy isActive and let this menu grab the
+            // keyboard mid-goal-typing (round-44 swift#5).
+            if NSApp.isActive && NSApp.keyWindow == nil { self?.showDropdown() }
         }
     }
 
@@ -405,10 +416,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // pane's key itself is dropped only once none of its tracked pids are live.
             var pruned: [String: Set<Int32>] = [:]
             for (paneId, pids) in self.appSpawnedPaneIds {
-                let live = pids.filter { self.model.liveDriving[paneId]?.pid == Int($0) }
+                let live = pids.filter { pid in
+                    if self.model.liveDriving[paneId]?.pid == Int(pid) { return true }
+                    // 10s grace for a just-launched child that hasn't claimed yet
+                    if let born = self.pidLaunchDates[pid], Date().timeIntervalSince(born) < 10 { return true }
+                    return false
+                }
                 if !live.isEmpty { pruned[paneId] = live }
             }
             self.appSpawnedPaneIds = pruned
+            self.pidLaunchDates = self.pidLaunchDates.filter { Date().timeIntervalSince($0.value) < 60 }
             self.paintMenuBar()
         }
     }

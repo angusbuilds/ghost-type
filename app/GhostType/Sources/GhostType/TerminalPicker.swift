@@ -31,10 +31,18 @@ final class TerminalPickerController: NSObject {
         self.onJoined = onJoined
     }
 
+    private var showGeneration = 0
     func show(near button: NSStatusBarButton) {
         dismiss()
+        showGeneration += 1
+        let requested = showGeneration
+        let at = Date()
         model.listTerminalTabs { [weak self] tabs in
             guard let self else { return }
+            // A slow tab-listing must not seize the keyboard long after the click that
+            // asked for it, nor may an older request present over a newer one (round-44
+            // swift#1). Stale or superseded → drop silently; the user has moved on.
+            guard requested == self.showGeneration, Date().timeIntervalSince(at) < 3.0 else { return }
             self.present(tabs: tabs, near: button)
         }
     }
@@ -94,6 +102,7 @@ final class TerminalPickerController: NSObject {
     }
 
     func dismiss() {
+        showGeneration += 1   // invalidate any in-flight listing so it can't present later
         if let escMonitor { NSEvent.removeMonitor(escMonitor); self.escMonitor = nil }
         guard let panel else { return }
         NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: panel)

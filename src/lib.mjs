@@ -119,7 +119,13 @@ export function withFileLock(target, fn, { attempts = 40, waitMs = 15, staleMs =
     if (!held) sleep(waitMs);
   }
   while (strict && !held) { held = tryAcquire(); if (!held) sleep(waitMs); }
-  try { return fn(); }
+  try {
+    const r = fn();
+    // finally below releases the lock the moment fn RETURNS — an async callback would run
+    // its awaited body completely unlocked (round-44 #12). Reject loudly.
+    if (r && typeof r.then === 'function') throw new Error('withFileLock callbacks must be synchronous — an async fn would run after the lock is released');
+    return r;
+  }
   finally {
     if (held) {
       try { if (fs.readFileSync(lock, 'utf8') === token) fs.rmSync(lock, { force: true }); } catch { /* best effort */ }

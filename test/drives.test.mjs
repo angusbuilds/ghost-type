@@ -183,7 +183,7 @@ test('stopDrive on a pane with no live drive kills nothing', () => {
 // entry for one pane can wrongly verify "alive" against an unrelated live drive whose pid
 // got reused (round-36 audit #13/#18).
 test('realDriveAlive does not match a paneId that is only a substring of the real one', async () => {
-  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', 'drive', '%12', 'fix-thing'], { stdio: 'ignore' });
+  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', '/fake/bin/ghost.mjs', 'drive', '%12', 'fix-thing'], { stdio: 'ignore' });
   try {
     await new Promise((res) => child.once('spawn', res));
     assert.equal(realDriveAlive({ pid: child.pid, paneId: '%1' }), false, '%1 must not match inside %12');
@@ -197,7 +197,7 @@ test('realDriveAlive does not match a paneId that is only a substring of the rea
 // legitimately contains this paneId as its own standalone token, at the WRONG position
 // (round-37 audit #1; round-36 #13/#18 only fixed the bare-SUBSTRING variant).
 test('realDriveAlive does not match a paneId that only appears inside the free-text goal', async () => {
-  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', 'drive', '%12', 'port', '%3', 'config', 'into', 'the', 'new', 'format'], { stdio: 'ignore' });
+  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', '/fake/bin/ghost.mjs', 'drive', '%12', 'port', '%3', 'config', 'into', 'the', 'new', 'format'], { stdio: 'ignore' });
   try {
     await new Promise((res) => child.once('spawn', res));
     // %3 is real drive %12's own free-text goal, not what pid is actually driving
@@ -212,7 +212,7 @@ test('realDriveAlive does not match a paneId that only appears inside the free-t
 // these flags in ANY position relative to the positionals), so a fixed +1 offset reads a
 // genuinely live, correctly-driving process as dead (round-38 audit #4).
 test('realDriveAlive finds the pane id past --engine/--max flags that precede it', async () => {
-  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', 'drive', '--engine', 'codex', '%7', 'fix', 'the', 'thing'], { stdio: 'ignore' });
+  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', '/fake/bin/ghost.mjs', 'drive', '--engine', 'codex', '%7', 'fix', 'the', 'thing'], { stdio: 'ignore' });
   try {
     await new Promise((res) => child.once('spawn', res));
     assert.equal(realDriveAlive({ pid: child.pid, paneId: '%7' }), true, '%7 must match even with --engine before it in argv');
@@ -291,4 +291,29 @@ test('stopDrive kills when expectedPid matches the live drive', () => {
   const r = stopDrive('%3', { file, isAlive: () => true, kill: (pid, sig) => killed.push([pid, sig]), expectedPid: 4242 });
   assert.deepEqual(r, { stopped: true, pid: 4242 });
   assert.deepEqual(killed, [[4242, 'SIGINT']]);
+});
+
+// Codex round-44: identity + probe-failure hardening.
+test('realDriveAlive-style check requires ghost.mjs in the argv, not just "drive <pane>"', async () => {
+  const { driveArgvMatches } = await import('../src/drives.mjs');
+  assert.equal(driveArgvMatches('node /Users/x/dev/ghost-type/bin/ghost.mjs drive %7 fix it', '%7'), true);
+  assert.equal(driveArgvMatches('node -e setTimeout(()=>{},1e6) marker drive %7', '%7'), false,
+    'an unrelated process that merely says "drive %7" must not pass identity');
+  assert.equal(driveArgvMatches('node ghost.mjs drive %71 goal', '%7'), false, 'pane id must match a whole token');
+});
+
+test('a probe failure never prunes an entry (unknown is not dead)', () => {
+  const file = tmpFile();
+  recordDrive('%3', { pid: 111, goal: 'a' }, { file });
+  const live = liveDrives({ file, isAlive: () => { throw new Error('ps unavailable'); } });
+  assert.deepEqual(Object.keys(live), ['%3'], 'unknown liveness must keep the entry (conservative)');
+  assert.deepEqual(Object.keys(readDrives(file)), ['%3']);
+});
+
+test('liveDrives heals a corrupt registry file back to valid JSON', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, '{corrupt json!!');
+  const live = liveDrives({ file, isAlive: () => true });
+  assert.deepEqual(live, {});
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {}, 'the invalid file must be rewritten as {}');
 });

@@ -5,6 +5,7 @@
 // otherwise make a recycled pid look like our drive), and the checks are injected so all
 // of this is testable offline. State persists under ~/.ghosttype/drives.json.
 import path from 'node:path';
+import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { STATE_DIR, readJson, writeJson, withFileLock } from './lib.mjs';
 
@@ -120,13 +121,25 @@ export function realDriveAlive(entry) {
     // fixed the bare-SUBSTRING variant, e.g. "%1" inside "%12"). And a real invocation like
     // `ghost drive --engine codex %7 "goal"` puts a flag+value BEFORE the pane id, so a
     // fixed +1 offset misreads a genuinely live drive as dead (round-38 audit #4).
-    const tokens = cmd.trim().split(/\s+/);
-    const driveIdx = tokens.indexOf('drive');
-    if (driveIdx === -1) return false;
-    let i = driveIdx + 1;
-    while (i < tokens.length && DRIVE_VALUE_FLAGS.has(tokens[i])) i += 2;
-    return i < tokens.length && tokens[i] === entry.paneId;
-  } catch { return false; }
+    return driveArgvMatches(cmd, entry.paneId);
+  } catch {
+    // The identity probe failed on a process that EXISTS — unknown, not dead (round-44 #6).
+    // But a pid that doesn't exist at all is definitive death: kill(pid, 0) throws ESRCH.
+    try { process.kill(entry.pid, 0); return true; } catch { return false; }
+  }
+}
+
+// Identity: the process must be OUR entrypoint (a ghost.mjs token), with this exact pane
+// as the first post-flag token after 'drive'. "drive %7" appearing in an unrelated argv
+// is not identity (codex round-44 #5).
+export function driveArgvMatches(cmd, paneId) {
+  const tokens = String(cmd).trim().split(/\s+/);
+  if (!tokens.some(t => /(^|\/)ghost\.mjs$/.test(t))) return false;
+  const driveIdx = tokens.indexOf('drive');
+  if (driveIdx === -1) return false;
+  let i = driveIdx + 1;
+  while (i < tokens.length && DRIVE_VALUE_FLAGS.has(tokens[i])) i += 2;
+  return i < tokens.length && tokens[i] === paneId;
 }
 
 // Live entries only — and dead ones are healed out of the file (a SIGKILLed drive never
@@ -140,11 +153,19 @@ export function realDriveAlive(entry) {
 // by stopDrive, so it hits this window often; it was simply missed when the fix was applied
 // to its two siblings on the same file (round-39 #1).
 export function liveDrives({ file = DRIVES_FILE, isAlive = realDriveAlive } = {}) {
-  const { snapshot, alive: aliveSnapshot } = snapshotAlive(file, isAlive);
+  // An isAlive that THROWS is an unknown, not a death — pruning on it would let a racing
+  // claim start a second drive on a pane whose incumbent is fine (round-44 #6).
+  const safeAlive = (e) => { try { return isAlive(e); } catch { return true; } };
+  const { snapshot, alive: aliveSnapshot } = snapshotAlive(file, safeAlive);
+  // A corrupt registry parses as {} but stays corrupt on disk forever, minting a .corrupt
+  // sidecar on every 4s poll (round-44 #10) — normalize it under the same lock.
+  let invalid = false;
+  try { const t = fs.readFileSync(file, 'utf8'); if (t.trim()) JSON.parse(t); }
+  catch (e) { invalid = e.code !== 'ENOENT'; }
   return withFileLock(file, () => {
     const cur = readDrives(file);
-    const { live, pruned } = pruneWithSnapshot(cur, snapshot, aliveSnapshot, isAlive);
-    if (pruned) writeJson(file, live);
+    const { live, pruned } = pruneWithSnapshot(cur, snapshot, aliveSnapshot, safeAlive);
+    if (pruned || invalid) writeJson(file, live);
     return live;
   }, { strict: true });
 }

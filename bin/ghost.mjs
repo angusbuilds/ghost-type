@@ -352,7 +352,12 @@ async function main() {
       // -A: same project name → same session, so re-joining a directory reattaches
       // instead of piling up parallel sessions. tmux replaces this screen until detach.
       const r = spawnSync('tmux', ['new-session', '-A', '-s', name], { stdio: 'inherit' });
-      process.exit(r.status ?? 0);
+      // status is null on spawn failure or death-by-signal — that is not success (round-44 #11).
+      if (r.error || r.signal || r.status === null) {
+        console.error(`ghost join: tmux failed to start${r.error ? ` (${r.error.message})` : r.signal ? ` (${r.signal})` : ''}`);
+        process.exit(1);
+      }
+      process.exit(r.status);
     }
     // Live drives only — liveDrives() verifies each pid against the process table and heals
     // dead entries out of the registry, so this output is truthful even after a SIGKILL.

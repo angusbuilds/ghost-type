@@ -11,6 +11,9 @@ import { execFileSync } from 'node:child_process';
 import { joinSessionName } from './sessions.mjs';
 
 const AGENT = /^(claude|codex|aider)$/i;
+// Auto-connect (ctrl-c → --continue) is claude-only: --continue is claude's flag, and the
+// busy-screen markers the idle gate reads are claude's. Other agents get the manual recipe.
+const CONTINUABLE = /^claude$/i;
 
 // The relaunch line: the agent's own argv + --continue (once), inside the same caffeinate
 // wrapper the user launched it with — dropping caffeinate would silently change whether
@@ -22,11 +25,15 @@ export function rebuildAgentCommand(argv, processes = []) {
 }
 
 export async function adoptTab(tty, deps) {
-  const { findTab, foregroundArgv, agentPid, shellCwd, kill, doScript, waitForIdle, sleep } = deps;
+  const { findTab, foregroundArgv, agentPid, shellCwd, kill, doScript, waitForIdle, sleep, sessionExists = () => false } = deps;
   const tab = findTab(tty);
   if (!tab) return { ok: false, reason: `no Terminal tab on ${tty}` };
 
-  const name = joinSessionName(shellCwd(tab));
+  // A taken name would make `tmux -A` ATTACH the existing session — and the relaunch line
+  // below would then be typed into whatever is already running there (codex round-44 #4).
+  // Adoption always creates a fresh session; only manual `ghost join` reattaches.
+  let name = joinSessionName(shellCwd(tab));
+  for (let n = 2; sessionExists(name); n++) name = `${joinSessionName(shellCwd(tab))}-${n}`;
   if (!tab.busy) {
     doScript(tab, `ghost join ${name}`);
     return { ok: true, joined: name };
@@ -34,8 +41,12 @@ export async function adoptTab(tty, deps) {
 
   const agent = tab.processes.find(p => AGENT.test(p));
   if (!agent) return { ok: false, reason: `${tty} is busy with something that is not a coding agent — ctrl-c it yourself first` };
+  if (!CONTINUABLE.test(agent)) return { ok: false, reason: `${tty} is running ${agent}, which has no --continue — ctrl-c it yourself, then ghost join` };
 
   const pid = agentPid(tab, agent);
+  // pid 0 means "could not resolve" — and kill(0, SIGINT) signals OUR ENTIRE PROCESS
+  // GROUP (codex round-44 #1, reproduced). Fail closed before anything is touched.
+  if (!Number.isInteger(pid) || pid <= 0) return { ok: false, reason: `could not identify the ${agent} process on ${tty} — nothing was touched` };
   const argv = foregroundArgv(tab, agent);
 
   // NEVER interrupt an agent mid-task: connect waits until it is genuinely at its input
@@ -189,6 +200,7 @@ export function realAdoptDeps() {
     // An agent that exits on the FIRST Ctrl-C makes the second kill hit a dead pid —
     // that's success, not an error.
     kill: (pid, sig) => { try { process.kill(pid, sig); } catch { /* already gone */ } },
+    sessionExists: (name) => { try { execFileSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' }); return true; } catch { return false; } },
     agentCpu: realAgentCpu,
     tabTail: realTabTail,
     onWait: ({ cpu, busyScreen }) => console.log(`  waiting — agent still working (cpu ${cpu.toFixed(0)}%${busyScreen ? ', busy on screen' : ''})…`),

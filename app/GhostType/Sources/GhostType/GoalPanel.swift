@@ -62,6 +62,10 @@ final class GoalPanelController: NSObject {
     // showing, and must not touch the shared UI state or dismiss the panel now open for
     // someone else (round-40 audit #2/#4).
     private var generation = 0
+    // The pid of THIS submission's spawned child, once it exists — cancel signals exactly
+    // that drive and nothing else. A pane-only cancel could SIGINT a CLI drive that won the
+    // claim race instead (codex round-44 swift#3).
+    private var launchedPidForCancel: Int32?
     private let model: GhostModel
     // Fires the instant the child process exists, so the app can register it as its own
     // before waiting to learn whether the drive actually took (round-39 audit #1).
@@ -177,7 +181,12 @@ final class GoalPanelController: NSObject {
         // remains reachable there (periodic prune, or Quit) — this is a best-effort immediate
         // stop, not the only backstop.
         if submitting, let targetPane = paneId {
-            model.undrive(targetPane)
+            if let lp = launchedPidForCancel {
+                model.undrive(targetPane, expectedPid: lp)
+            }
+            // No pane-only fallback: if our child hasn't launched yet it either loses the
+            // one-drive-per-pane claim to whoever holds the pane, or lands in
+            // appSpawnedPaneIds via onLaunched and stays reachable (prune, Quit).
         }
         NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: panel)
         panel.orderOut(nil)
@@ -186,6 +195,7 @@ final class GoalPanelController: NSObject {
         self.caption = nil
         self.paneId = nil
         self.submitting = false
+        self.launchedPidForCancel = nil
         generation += 1   // invalidate any in-flight startDrive completion captured against this panel instance
         if restoreFocus, let previousApp {
             if #available(macOS 14.0, *) { previousApp.activate() } else { previousApp.activate(options: []) }
@@ -221,6 +231,7 @@ final class GoalPanelController: NSObject {
             // Deliberately NOT gated on `generation`: this registers the spawned pid for the
             // app's own cleanup tracking regardless of whether the panel that requested it is
             // still showing, and skipping it here would reopen the exact Quit race above.
+            self?.launchedPidForCancel = launchedPid
             self?.onLaunched(pid, launchedPid)
         }) { [weak self] started, spawnedPid, errText in
             guard let self else { return }

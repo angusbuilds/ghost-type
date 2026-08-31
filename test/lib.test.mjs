@@ -190,3 +190,13 @@ test('withFileLock release never deletes a lock file whose content is not the to
   assert.equal(fs.readFileSync(lock, 'utf8'), 'someone-else-owns-this-now', 'release must not touch a lock whose content is not the token it wrote');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// Codex round-44 #12: withFileLock releases in `finally` the moment fn RETURNS — an async
+// fn would run its awaited body unlocked. Reject thenables loudly instead of silently
+// breaking mutual exclusion.
+test('withFileLock rejects an async callback instead of silently unlocking early', async () => {
+  const { withFileLock } = await import('../src/lib.mjs');
+  const os = await import('node:os'); const fs = await import('node:fs'); const path = await import('node:path');
+  const target = path.default.join(fs.default.mkdtempSync(path.default.join(os.default.tmpdir(), 'gt-lock-')), 'x.json');
+  assert.throws(() => withFileLock(target, async () => 1), /synchronous/i);
+});

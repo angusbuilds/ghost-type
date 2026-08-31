@@ -2,7 +2,8 @@
 // bar will use it: `drives --json` is what the app polls, `undrive` is how it stops a
 // drive, and the already-driving guard is what stops two loops typing into one pane.
 // The "live drive" here is a dummy node process whose argv contains ` drive %7` — real
-// enough for the ps-based liveness check without spending a token or needing tmux.
+// enough for the ps-based liveness check (which now also requires a ghost.mjs argv
+// token) without spending a token or needing tmux.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -30,7 +31,7 @@ function freshHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'gt-drives-c
 // A live process whose ps command line reads `node -e ... marker drive %7` — satisfies
 // realDriveAlive's pid+argv check for pane %7.
 function spawnDummyDrive() {
-  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', 'marker', 'drive', '%7'], { stdio: 'ignore' });
+  const child = spawn('node', ['-e', 'setTimeout(() => {}, 30000)', '/fake/bin/ghost.mjs', 'drive', '%7'], { stdio: 'ignore' });
   return child;
 }
 function seedRegistry(home, paneId, pid) {

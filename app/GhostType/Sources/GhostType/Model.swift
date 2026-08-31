@@ -81,22 +81,39 @@ final class GhostModel: ObservableObject {
     // @Published properties — callers that need to paint from the result (not just kick
     // off the next tick) must hang off completion, or they'll paint the PREVIOUS tick's
     // state instead (round-36 audit #1/#11).
+    // Timer ticks with no completion coalesce: a slow bridge must not build a backlog of
+    // identical polls ahead of user actions (codex round-44 swift#6).
+    private let refreshGate = NSLock()
+    private var queuedTimerRefreshes = 0
     func refresh(completion: (() -> Void)? = nil) {
+        if completion == nil {
+            refreshGate.lock()
+            if queuedTimerRefreshes >= 2 { refreshGate.unlock(); return }
+            queuedTimerRefreshes += 1
+            refreshGate.unlock()
+        }
         queue.async { [weak self] in
+            defer {
+                if completion == nil, let self {
+                    self.refreshGate.lock(); self.queuedTimerRefreshes -= 1; self.refreshGate.unlock()
+                }
+            }
             guard let self else { return }
             let sessionsOut = self.run(["sessions", "--json"])
             let drivesOut = self.run(["drives", "--json"])
+            // A failed shell-out or decode is UNKNOWN, not "nothing running" — keep the
+            // last verified state instead of painting active rows idle (round-44 swift#7).
             let sessions = sessionsOut.data(using: .utf8)
-                .flatMap { try? JSONDecoder().decode([Session].self, from: $0) } ?? []
+                .flatMap { try? JSONDecoder().decode([Session].self, from: $0) }
             let driving = drivesOut.data(using: .utf8)
-                .flatMap { try? JSONDecoder().decode([String: DriveEntry].self, from: $0) } ?? [:]
+                .flatMap { try? JSONDecoder().decode([String: DriveEntry].self, from: $0) }
             var status = "off"
             if let d = try? Data(contentsOf: URL(fileURLWithPath: self.stateFile)),
                let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                let s = obj["status"] as? String { status = s }
             DispatchQueue.main.async {
-                self.sessions = sessions
-                self.liveDriving = driving
+                if let sessions { self.sessions = sessions }
+                if let driving { self.liveDriving = driving }
                 self.daemonStatus = status
                 completion?()
             }
@@ -239,9 +256,11 @@ final class GhostModel: ObservableObject {
         try? p.run()
     }
 
-    func undrive(_ paneId: String) {
+    func undrive(_ paneId: String, expectedPid: Int32? = nil) {
         queue.async { [weak self] in
-            self?.run(["undrive", paneId])
+            var args = ["undrive", paneId]
+            if let expectedPid { args += ["--pid", String(expectedPid)] }
+            self?.run(args)
             DispatchQueue.main.async { self?.refresh() }
         }
     }

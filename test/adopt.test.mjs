@@ -162,3 +162,33 @@ test('quiet CPU alone is not enough — a busy screen marker still blocks the co
   assert.equal(r.ok, false);
   assert.deepEqual(calls, []);
 });
+
+// Codex round-44 findings, Node side.
+test('adopt refuses when the agent pid cannot be resolved (kill(0) would signal our whole group)', async () => {
+  const { d, calls } = gentleDeps([0.5, 0.4], ['❯ '], { agentPid: () => 0 });
+  const r = await adoptTab('/dev/ttys001', d);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /could not identify/i);
+  assert.deepEqual(calls, []);
+});
+
+test('adopt auto-connects only claude — codex/aider decline with the manual recipe', async () => {
+  const { d, calls } = gentleDeps([0.5, 0.4], ['❯ '], {
+    findTab: (tty) => ({ windowId: 1, tabIndex: 1, tty, busy: true, processes: ['login', '-zsh', 'codex'] }),
+  });
+  const r = await adoptTab('/dev/ttys001', d);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /ctrl-c/i);
+  assert.deepEqual(calls, []);
+});
+
+test('adopt gives the joined session a unique name when the project name is taken', async () => {
+  const { d, calls } = gentleDeps([0.5, 0.4], ['❯ '], {
+    sessionExists: (name) => name === 'proj',
+  });
+  const r = await adoptTab('/dev/ttys001', d);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const joins = calls.filter(c => c[0] === 'doScript' && String(c[1]).startsWith('ghost join'));
+  assert.deepEqual(joins, [['doScript', 'ghost join proj-2']],
+    'a taken name must get a fresh suffix — tmux -A would otherwise attach the EXISTING session and the relaunch line would be typed into it');
+});
