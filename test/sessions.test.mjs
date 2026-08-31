@@ -35,3 +35,14 @@ test('selectableSessions puts agent-ish panes first', () => {
 test('listSessions returns [] when tmux is unavailable', () => {
   assert.deepEqual(listSessions({ tmux: () => { throw new Error('no tmux'); } }), []);
 });
+
+// `ghost join` names the tmux session after the project directory — sanitized to what tmux
+// session names allow (':' and '.' are target separators, so they must never appear).
+test('joinSessionName derives a safe tmux session name from a cwd', async () => {
+  const { joinSessionName } = await import('../src/sessions.mjs');
+  assert.equal(joinSessionName('/Users/angus/dev/token-spread'), 'token-spread');
+  assert.equal(joinSessionName('/Users/angus/dev/my.app:v2'), 'my-app-v2');
+  assert.equal(joinSessionName('/Users/angus/dev/weird  name!!'), 'weird-name');
+  assert.equal(joinSessionName('/'), 'ghost');
+  assert.equal(joinSessionName(''), 'ghost');
+});

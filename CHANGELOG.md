@@ -2,6 +2,19 @@
 
 All notable changes to Ghost Type. Dates are the day the work landed.
 
+## [0.2.1] — 2026-08-30
+
+- **`ghost join [name]`** — the enrollment half of menu-bar driving. Typed in any terminal,
+  it wraps that terminal in a tmux session named after the project directory (same tab,
+  `-A` so re-joining a project reattaches), which makes it appear in the dropdown and
+  become driveable. Driving stays tmux-only on purpose — `send-keys` + `capture-pane` is
+  the whole safety story; `join` turns that constraint into one word instead of a tmux
+  lesson. Not a tty → clear guidance, exit 1; already inside tmux → says so, exit 0.
+- **Dropdown empty state teaches the move** — "type `ghost join` in any terminal to add it"
+  replaces the dead-end "no tmux sessions running".
+- For a session already running outside tmux: `Ctrl-C` → `ghost join` → `claude --continue`
+  brings it back with history, now visible in the menu bar.
+
 ## [0.2.0] — 2026-08-30
 
 The menu bar drives for real now — the one item the audit campaign deferred

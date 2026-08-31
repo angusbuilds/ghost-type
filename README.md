@@ -167,6 +167,7 @@ ghost sessions                  # list your tmux panes (agents first)
 ghost haunt <pane> / unhaunt <pane>     # tint a pane purple / release it (marks it, does not drive)
 ghost drive <pane> "<goal>"     # watch it; type the next prompt when it goes idle
 ghost drives [--json] / undrive <pane>  # list live drives · stop one
+ghost join [name]               # wrap THIS terminal in tmux → it appears in the menu bar
 ```
 
 The menu-bar app drives now, not just marks: pick an idle session, type a goal, and it spawns a

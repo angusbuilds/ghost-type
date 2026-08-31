@@ -289,3 +289,29 @@ test('`ghost drive --engine <valid-value> <pane> "<goal>"` still targets the rea
     assert.match(r.out, /pane-gone/);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
+
+// `ghost join` — the enrollment half of menu-bar driving: typed in a terminal, it wraps
+// that terminal in a named tmux session so it appears in the dropdown. In tests stdio is a
+// pipe, never a tty, so join must take the guidance path — it can never spawn tmux here.
+test('`ghost join` inside tmux says the terminal is already driveable (exit 0)', () => {
+  const home = freshHome();
+  try {
+    const opts = { env: { ...process.env, HOME: home, TMUX: '/tmp/fake,123,0' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+    const out = execFileSync('node', [GHOST, 'join'], opts);
+    assert.match(out, /already driveable/i);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('`ghost join` without a tty prints guidance instead of spawning tmux (exit 1)', () => {
+  const home = freshHome();
+  try {
+    const env = { ...process.env, HOME: home };
+    delete env.TMUX;
+    const r = (() => {
+      try { return { code: 0, out: execFileSync('node', [GHOST, 'join'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; }
+      catch (e) { return { code: e.status ?? 1, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    })();
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /run it in a terminal/i);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});

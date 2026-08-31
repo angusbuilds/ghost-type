@@ -8,11 +8,12 @@
 //   ghost queue                     show tonight's planned cards
 //   ghost report                    print the latest morning report
 //   ghost sessions | haunt | unhaunt | drive | drives | undrive   live-terminal mode
+//   ghost join [name]              wrap THIS terminal in tmux → driveable from the menu bar
 //   ghost doctor | logs [N]         environment check · recent log lines
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { WORK_DIR, STATE_DIR, CLAUDE_BIN, LOG_FILE, ensureState } from '../src/lib.mjs';
 import { scanDevRoot } from '../src/dossier.mjs';
 import { planCards, isCodingCard, countUnmergedGhostBranches, listGhostBranches } from '../src/planner.mjs';
@@ -31,7 +32,7 @@ import { renderReportHtml } from '../src/report-html.mjs';
 import { notifyVerdict } from '../src/notify.mjs';
 import { Governor } from '../src/governor.mjs';
 import { recordLineage } from '../src/lineage.mjs';
-import { selectableSessions } from '../src/sessions.mjs';
+import { selectableSessions, joinSessionName } from '../src/sessions.mjs';
 import { loadConfig, nightDeadlineMs } from '../src/config.mjs';
 import { checkEnv, renderDoctor } from '../src/doctor.mjs';
 import { realOnBattery, realFreeDiskGB, realQuarantineBacklog } from '../src/daemon.mjs';
@@ -308,6 +309,23 @@ async function main() {
     case 'haunt': { const id = rest[0]; if (!id) throw new UsageError('ghost haunt <pane-id>'); haunt(id); console.log(`🟣 haunting ${id}`); break; }
     case 'unhaunt': { const id = rest[0]; if (!id) throw new UsageError('ghost unhaunt <pane-id>'); unhaunt(id); console.log(`released ${id}`); break; }
     case 'haunts': { const list = readHaunted(); console.log(list.length ? 'haunting: ' + list.join(', ') : 'not haunting any panes'); break; }
+    // The enrollment half of menu-bar driving: typed in any terminal, it wraps THAT
+    // terminal in a named tmux session — same tab, now visible and driveable from the
+    // dropdown. Driving stays tmux-only on purpose (send-keys + capture-pane is the whole
+    // safety story); join is what makes that a one-word step instead of a tmux lesson.
+    case 'join': {
+      const name = rest[0] ? joinSessionName(rest[0]) : joinSessionName(process.cwd());
+      if (process.env.TMUX) { console.log('this terminal is already driveable — it is inside tmux, so it already shows in the menu bar'); break; }
+      if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        console.error('ghost join wraps THIS terminal in tmux — run it in a terminal, not a pipe or script.');
+        process.exit(1);
+      }
+      console.log(`👻 joining as "${name}" — this terminal now shows in the menu bar`);
+      // -A: same project name → same session, so re-joining a directory reattaches
+      // instead of piling up parallel sessions. tmux replaces this screen until detach.
+      const r = spawnSync('tmux', ['new-session', '-A', '-s', name], { stdio: 'inherit' });
+      process.exit(r.status ?? 0);
+    }
     // Live drives only — liveDrives() verifies each pid against the process table and heals
     // dead entries out of the registry, so this output is truthful even after a SIGKILL.
     case 'drives': {
@@ -445,6 +463,7 @@ async function main() {
         '  ghost on "<goal>" [--project P] [--dry-run]   arm + run tonight',
         '  ghost sessions | haunt <pane> | unhaunt <pane> | drive <pane> "<goal>"',
         '  ghost drives [--json] | undrive <pane>       live drives · stop one',
+        '  ghost join [name]                    make THIS terminal driveable',
         '  ghost doctor                         check the environment is ready',
         '  ghost off | status | queue | report | logs [N]'].join('\n');
       // Bare `ghost` is a help request (exit 0); an actual unknown command is a usage

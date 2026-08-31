@@ -103,9 +103,15 @@ struct GhostPanel: View {
             scaleLabel("SESSIONS").padding(.top, 2)
 
             if model.sessions.isEmpty {
-                Text("no tmux sessions running")
-                    .font(Theme.body).foregroundColor(Theme.ink3)
-                    .padding(.vertical, Theme.Space.s2)
+                // The "add" affordance: the menu bar can't reach into other apps' tabs, so
+                // enrollment happens in the terminal itself — teach the one word that does it.
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("no terminals here yet")
+                        .font(Theme.body).foregroundColor(Theme.ink3)
+                    Text("type `ghost join` in any terminal to add it")
+                        .font(Theme.caption).foregroundColor(Theme.ink3)
+                }
+                .padding(.vertical, Theme.Space.s2)
             } else {
                 VStack(spacing: 3) {
                     ForEach(model.sessions) { s in

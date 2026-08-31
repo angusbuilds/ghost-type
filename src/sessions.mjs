@@ -4,6 +4,7 @@
 // chosen pane is the target for the purple tint + prompt injection. tmux runner is injected
 // so this is testable offline.
 import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 
 const FMT = '#{pane_id}\t#{session_name}\t#{window_index}.#{pane_index}\t#{pane_current_command}\t#{window_name}\t#{pane_title}';
 
@@ -43,4 +44,13 @@ export function listSessions({ tmux = realTmux } = {}) {
 export function selectableSessions(opts = {}) {
   const all = listSessions(opts);
   return [...all.filter(isAgentSession), ...all.filter(p => !isAgentSession(p))];
+}
+
+// `ghost join` session naming: the project directory IS the name (that's how Angus thinks
+// of his terminals), sanitized to tmux's rules — ':' and '.' are target separators and must
+// never appear in a session name. Falls back to 'ghost' when the cwd gives nothing usable.
+export function joinSessionName(cwd) {
+  const base = path.basename(String(cwd || ''));
+  const safe = base.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return safe || 'ghost';
 }
