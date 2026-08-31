@@ -306,10 +306,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer = t
 
         // Launch feedback: an accessory app has no window and no Dock bounce, so a launch
-        // with no open dropdown is indistinguishable from "nothing happened" — the original
-        // popover build showed itself on launch for exactly this reason. The delay lets the
-        // first refresh land so the panel opens populated, not empty.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showDropdown() }
+        // with no open dropdown is indistinguishable from "nothing happened" — but an
+        // opening NSMenu GRABS THE KEYBOARD, so it must never appear spontaneously (a
+        // login-item or scripted launch popping a menu mid-keystroke steals the user's
+        // typing — reported live as "a glitch while I'm typing"). NSApp.isActive separates
+        // the two: a user double-click activates the app, a background launch doesn't.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            if NSApp.isActive { self?.showDropdown() }
+        }
     }
 
     // Double-clicking the app icon while it's already running fires reopen, not launch —
