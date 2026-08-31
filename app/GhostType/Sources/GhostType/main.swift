@@ -284,6 +284,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked(_:))
+        // Fire on mouse-UP (Headroom's exact line): with the default mouse-down action,
+        // showDropdown's performClick opens the menu while the physical button is still
+        // held, and the release instantly dismisses it — a click that looks like nothing.
+        statusItem.button?.sendAction(on: [.leftMouseUp])
 
         goalPanel = GoalPanelController(model: model, onLaunched: { [weak self] paneId, pid in
             // The instant the child process exists, not gated on confirming the drive
