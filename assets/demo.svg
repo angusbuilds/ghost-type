@@ -1,0 +1,45 @@
+<svg width="760" height="270" viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace">
+  <!-- a stylized drive: the agent stalls, the ghost notices, and types the next prompt.
+       Pure SMIL — GitHub renders this animated inside a README <img>. -->
+  <rect width="760" height="270" rx="12" fill="#161b22" stroke="#30363d"/>
+  <circle cx="722" cy="22" r="5" fill="#30363d"/>
+  <circle cx="704" cy="22" r="5" fill="#30363d"/>
+  <circle cx="686" cy="22" r="5" fill="#30363d"/>
+  <text x="28" y="26" font-size="12" fill="#6e7681">gallery — claude — tmux %3</text>
+
+  <g font-size="15">
+    <!-- the agent finishing, already on screen -->
+    <text x="28" y="66" fill="#8b949e">✓ tests: 34 passing, <tspan fill="#e5534b">1 failing</tspan> — auth.test.ts, stale session mock</text>
+    <text x="28" y="92" fill="#8b949e">⏺ I'm not sure how to proceed. The mock may need regenerating.</text>
+
+    <!-- the pane goes quiet; the ghost's status line fades in -->
+    <text x="28" y="130" font-size="13" fill="#6e7681" opacity="0">
+      pane stable ×2 · keyboard idle 74s · composing in your voice…
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.18;0.24;0.55;0.6" dur="10s" repeatCount="indefinite"/>
+    </text>
+
+    <!-- the ghost types: revealed by a clip that widens like a caret moving -->
+    <clipPath id="typeclip">
+      <rect x="28" y="150" width="0" height="30">
+        <animate attributeName="width" values="0;0;640;640" keyTimes="0;0.32;0.62;1" dur="10s" repeatCount="indefinite"/>
+      </rect>
+    </clipPath>
+    <text x="28" y="170" fill="#c9d1d9" clip-path="url(#typeclip)"><tspan fill="#8B5CF6">❯</tspan> ok the mock is stale — regen the auth fixture and rerun just auth.test.ts</text>
+
+    <!-- cursor: rides along during the reveal, blinks at rest -->
+    <rect x="28" y="156" width="9" height="18" fill="#8B5CF6" opacity="0">
+      <animate attributeName="x" values="46;46;672;672" keyTimes="0;0.32;0.62;1" dur="10s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0;1;1;0.15;1;0.15;1" keyTimes="0;0.3;0.32;0.66;0.74;0.82;0.9;1" dur="10s" repeatCount="indefinite"/>
+    </rect>
+
+    <!-- the submit + outcome -->
+    <text x="28" y="208" font-size="13" fill="#6e7681" opacity="0">
+      ⏎ sent · one bounded line · every safety check re-run in the instant before Enter
+      <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.66;0.72;1" dur="10s" repeatCount="indefinite"/>
+    </text>
+    <text x="28" y="240" font-size="14" fill="#57ab5a" opacity="0">
+      04:12 · tests green → branch ghost/gallery ready for your morning review
+      <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.8;0.86;1" dur="10s" repeatCount="indefinite"/>
+    </text>
+  </g>
+</svg>

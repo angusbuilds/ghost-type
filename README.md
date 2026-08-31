@@ -76,6 +76,10 @@ transcript-learned, prompt-*author* — is what Ghost Type crosses.
 
 ## Ten seconds to driving
 
+<p align="center">
+  <img src="assets/demo.svg" width="700" alt="Animated: the agent stalls, the ghost notices the idle pane, and types the next prompt in your voice">
+</p>
+
 The pane tints purple, and the ghost types the next prompt only when the agent inside has
 gone idle *and* you haven't touched the keyboard for a minute — it backs off the moment
 you're back. The same thing without the menu bar:
