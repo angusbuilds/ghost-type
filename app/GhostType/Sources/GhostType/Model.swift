@@ -187,6 +187,75 @@ final class GhostModel: ObservableObject {
         }
     }
 
+    // Terminal.app enrollment bridge. Listing and joining go through osascript because
+    // Terminal is scriptable and tmux-wrapping a tab REQUIRES running `ghost join` inside
+    // that tab's own shell — `do script` is the only supported way in. First use triggers
+    // the one-time "GhostType wants to control Terminal" permission prompt.
+    private func osascript(_ script: String) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", script]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func listTerminalTabs(completion: @escaping ([TermTab]) -> Void) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let script = """
+            set out to ""
+            tell application "Terminal"
+              repeat with w in windows
+                set wid to id of w
+                set wname to name of w
+                set i to 0
+                repeat with t in tabs of w
+                  set i to i + 1
+                  set pstr to ""
+                  repeat with pp in (processes of t)
+                    set pstr to pstr & pp & ","
+                  end repeat
+                  set out to out & wid & "\\t" & i & "\\t" & tty of t & "\\t" & busy of t & "\\t" & pstr & "\\t" & wname & linefeed
+                end repeat
+              end repeat
+            end tell
+            return out
+            """
+            let raw = self.osascript(script)
+            let tabs: [TermTab] = raw.split(separator: "\n").compactMap { line in
+                let f = line.components(separatedBy: "\t")
+                guard f.count >= 6, let wid = Int(f[0]), let idx = Int(f[1]) else { return nil }
+                let procs = f[4].split(separator: ",").map(String.init)
+                // A tab already inside tmux is wrapped — it's either in the sessions list
+                // or one attach away; offering to join it again is noise.
+                if procs.contains("tmux") { return nil }
+                // The foreground chain for a claude tab reads login,-zsh,caffeinate,claude —
+                // name the tab by the agent the user thinks of it as, not its wrapper.
+                let agents = ["claude", "codex", "aider", "grok"]
+                let process = procs.last(where: { agents.contains($0.lowercased()) }) ?? procs.last ?? ""
+                return TermTab(windowId: wid, tabIndex: idx, tty: f[2], busy: f[3] == "true", process: process, windowName: f[5])
+            }
+            DispatchQueue.main.async { completion(tabs) }
+        }
+    }
+
+    func joinTerminalTab(_ tab: TermTab, completion: @escaping (Bool) -> Void) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let script = "tell application \"Terminal\" to do script \"ghost join\" in tab \(tab.tabIndex) of window id \(tab.windowId)"
+            let out = self.osascript(script)
+            // give join a beat to create the session, then refresh picks it up
+            Thread.sleep(forTimeInterval: 0.8)
+            DispatchQueue.main.async {
+                completion(!out.isEmpty)   // do script echoes the tab reference on success, nothing on error
+                self.refresh()
+            }
+        }
+    }
+
     func undrive(_ paneId: String) {
         queue.async { [weak self] in
             self?.run(["undrive", paneId])

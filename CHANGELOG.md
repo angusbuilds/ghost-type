@@ -2,6 +2,16 @@
 
 All notable changes to Ghost Type. Dates are the day the work landed.
 
+## [0.2.2] — 2026-08-30
+
+- **Pick a terminal instead of typing in one** — a quiet `+ add a terminal` row in the
+  dropdown opens a picker listing your real Terminal.app tabs (named by the agent running
+  in them, not the `caffeinate` wrapper). Click an idle tab and the app runs `ghost join`
+  in it for you via Apple Events (`do script` — first use asks once for permission to
+  control Terminal). Tabs already inside tmux are filtered out; busy tabs (a running
+  claude owns the tty — nothing can wrap it from outside) render disabled with the
+  `ctrl-c` → join → `claude --continue` recipe.
+
 ## [0.2.1] — 2026-08-30
 
 - **`ghost join [name]`** — the enrollment half of menu-bar driving. Typed in any terminal,

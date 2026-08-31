@@ -53,6 +53,7 @@ struct VisualEffect: NSViewRepresentable {
 struct GhostPanel: View {
     @ObservedObject var model: GhostModel
     let onSelect: (Session) -> Void
+    let onAddTerminal: () -> Void
     let onRefresh: () -> Void
     let onReport: () -> Void
     let onQuit: () -> Void
@@ -103,15 +104,9 @@ struct GhostPanel: View {
             scaleLabel("SESSIONS").padding(.top, 2)
 
             if model.sessions.isEmpty {
-                // The "add" affordance: the menu bar can't reach into other apps' tabs, so
-                // enrollment happens in the terminal itself — teach the one word that does it.
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("no terminals here yet")
-                        .font(Theme.body).foregroundColor(Theme.ink3)
-                    Text("type `ghost join` in any terminal to add it")
-                        .font(Theme.caption).foregroundColor(Theme.ink3)
-                }
-                .padding(.vertical, Theme.Space.s2)
+                Text("no terminals here yet — add one below, or type `ghost join` in any terminal")
+                    .font(Theme.caption).foregroundColor(Theme.ink3)
+                    .padding(.vertical, Theme.Space.s2)
             } else {
                 VStack(spacing: 3) {
                     ForEach(model.sessions) { s in
@@ -119,6 +114,7 @@ struct GhostPanel: View {
                     }
                 }
             }
+            AddTerminalRow { onAddTerminal() }
 
             rule
             footer
@@ -180,6 +176,33 @@ private struct AccessoryBarStyle: ViewModifier {
     }
 }
 
+// The picker's front door: a quiet row, same species as the sessions above it, that opens
+// the Terminal-tab picker — click the terminal you mean and it joins itself.
+struct AddTerminalRow: View {
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(hover ? Theme.ink2 : Theme.ink3)
+                    .frame(width: 8)
+                Text("add a terminal")
+                    .font(Theme.caption).foregroundColor(hover ? Theme.ink2 : Theme.ink3)
+                Spacer()
+            }
+            .padding(.horizontal, Theme.Space.s3)
+            .padding(.vertical, 5)
+            .background(hover ? Theme.hover : Color.clear)
+            .cornerRadius(Theme.rowRadius)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
+    }
+}
+
 struct SessionRow: View {
     let session: Session
     let driving: Bool
@@ -228,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // re-fit its frame to freshly-arrived content (see showDropdown).
     private var dropdownHost: NSHostingView<GhostPanel>?
     private var goalPanel: GoalPanelController!
+    private var terminalPicker: TerminalPickerController!
     private let model = GhostModel()
     private var timer: Timer?
     // The ONLY app-side state: which drives this app itself spawned, so quit can stop
@@ -271,6 +295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }, onSpawned: { [weak self] in
             self?.model.refresh()
         })
+
+        terminalPicker = TerminalPickerController(model: model) { [weak self] in self?.model.refresh() }
 
         updateMenuBar()
         // .common so the label keeps updating while the dropdown or goal panel is
@@ -386,6 +412,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let host = NSHostingView(rootView: GhostPanel(
             model: model,
             onSelect: { [weak self] session in self?.selected(session) },
+            onAddTerminal: { [weak self] in
+                guard let self else { return }
+                self.dismissDropdown()
+                if let button = self.statusItem.button { self.terminalPicker.show(near: button) }
+            },
             onRefresh: { [weak self] in self?.refreshDropdown() },
             onReport: { [weak self] in
                 self?.dismissDropdown()

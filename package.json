@@ -1,6 +1,6 @@
 {
   "name": "ghost-type",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "An always-on daemon that keeps coding agents working while you're away \u2014 and writes the next prompt in your voice.",
   "type": "module",
   "private": true,
