@@ -35,4 +35,4 @@ if (!panes.length) {
 }
 console.log('---');
 console.log(`Refresh | refresh=true`);
-console.log(`Open Ghost Type repo | href=https://github.com/hangryclaude/ghost-type`);
+console.log(`Open Ghost Type repo | href=https://github.com/angusbuilds/ghost-type`);

@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Is it a question?
-    url: https://github.com/hangryclaude/ghost-type#faq
+    url: https://github.com/angusbuilds/ghost-type#faq
     about: The README's FAQ and Troubleshooting sections cover the common ones.
   - name: Security concern?
-    url: https://github.com/hangryclaude/ghost-type/blob/main/SECURITY.md
+    url: https://github.com/angusbuilds/ghost-type/blob/main/SECURITY.md
     about: The threat model, guarantees, and how to report privately.

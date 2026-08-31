@@ -9,7 +9,8 @@
 
 <p align="center">
   <img alt="version" src="https://img.shields.io/badge/release-v0.2.3-8b5cf6">
-  <img alt="tests" src="https://img.shields.io/badge/tests-429%20passing-brightgreen">
+  <img alt="ci" src="https://img.shields.io/github/actions/workflow/status/angusbuilds/ghost-type/ci.yml?branch=main&label=ci">
+  <img alt="tests" src="https://img.shields.io/badge/tests-439%20passing-brightgreen">
   <img alt="deps" src="https://img.shields.io/badge/runtime%20deps-0-blueviolet">
   <img alt="engines" src="https://img.shields.io/badge/engines-Claude%20%2B%20Codex-8b5cf6">
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS-black">
@@ -40,7 +41,7 @@ history intact.
 > install, ever. The menu-bar app assumes the repo lives at `~/dev/ghost-type`.
 
 ```bash
-git clone https://github.com/hangryclaude/ghost-type ~/dev/ghost-type
+git clone https://github.com/angusbuilds/ghost-type ~/dev/ghost-type
 cd ~/dev/ghost-type
 node --test                                  # the whole suite, offline — spends no tokens
 
@@ -222,7 +223,6 @@ Tunables (token cap, hard-stop hour, poll cadence, thresholds) live in
 | `already driving %N (pid P)` | By design: one live drive per pane — `ghost undrive %N` first |
 | `ghost join … run it in a terminal` | It was piped/scripted — join wraps a real tty |
 | **connect** left the tab at a shell prompt | The relaunch line needs your agent on PATH in that shell — run `claude --continue` yourself, the join already worked |
-| GitHub Actions shows no runs | Deliberate: private-repo Actions won't start without billing, so CI is `workflow_dispatch`-only; the suite runs locally on every change |
 
 ## Honest limitations
 
