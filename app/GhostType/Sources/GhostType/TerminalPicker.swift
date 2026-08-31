@@ -40,7 +40,7 @@ final class TerminalPickerController: NSObject {
     }
 
     private func present(tabs: [TermTab], near button: NSStatusBarButton) {
-        let width: CGFloat = 340
+        let width: CGFloat = 360
         let content = TerminalPickerView(
             tabs: tabs,
             onPick: { [weak self] tab in self?.join(tab) },
@@ -143,7 +143,7 @@ struct TerminalPickerView: View {
         }
         .padding(.horizontal, Theme.margin)
         .padding(.vertical, Theme.Space.s3)
-        .frame(width: 340)
+        .frame(width: 360)
         .background(VisualEffect(material: .menu).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)))
     }
 }
@@ -195,11 +195,29 @@ struct TermTabRow: View {
         !tab.busy || ["claude", "codex", "aider"].contains(tab.process.lowercased())
     }
 
-    // Window names carry Terminal's own suffix ("… — 120×38") — noise at this width.
+    // Terminal window names are "angus — ✳ project-title — caffeinate ◂ claude --flags —
+    // 120×38": the ONLY segment a human recognizes is the tab title in the middle. Keep
+    // that; drop the username, the command chain, the size suffix, and the status spinner
+    // glyph Claude Code prefixes it with.
     private var cleanName: String {
-        let name = tab.windowName.replacingOccurrences(of: #" — \d+×\d+$"#, with: "", options: .regularExpression)
-        return name.isEmpty ? tab.tty : name
+        let segments = tab.windowName.components(separatedBy: " — ")
+        let user = NSUserName()
+        let candidate = segments.first { seg in
+            let t = seg.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || t == user { return false }
+            if t.range(of: #"^\d+×\d+$"#, options: .regularExpression) != nil { return false }
+            if t.contains("◂") || t.contains("--") { return false }
+            if t.lowercased() == tab.process.lowercased() { return false }
+            if t.hasSuffix("zsh") || t.hasSuffix("bash") { return false }
+            return true
+        }
+        guard var best = candidate?.trimmingCharacters(in: .whitespaces) else {
+            return "\(tab.process) · \(shortTty)"
+        }
+        if let r = best.rangeOfCharacter(from: .alphanumerics) { best = String(best[r.lowerBound...]) }
+        return best
     }
+    private var shortTty: String { tab.tty.replacingOccurrences(of: "/dev/", with: "") }
 
     var body: some View {
         Button(action: { if connectable { action() } }) {
@@ -210,9 +228,10 @@ struct TermTabRow: View {
                     .frame(width: 8, height: 8)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cleanName).font(Theme.value).foregroundColor(connectable ? Theme.ink : Theme.ink3)
-                        .lineLimit(1).truncationMode(.middle)
-                    Text(tab.busy ? "\(tab.process) — running, reconnects with history" : tab.process)
+                        .lineLimit(1).truncationMode(.tail)
+                    Text("\(tab.process) · \(shortTty)")
                         .font(Theme.caption).foregroundColor(Theme.ink3)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Text(connectable ? (tab.busy ? "connect" : "join") : "ctrl-c first")
