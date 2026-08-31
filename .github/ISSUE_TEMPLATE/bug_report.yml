@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in the loop misbehaved
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bug reports are welcome — see the README's contributions note for how they get
+        handled. `ghost doctor` output and a redacted log excerpt do most of the diagnostic
+        work, so include them if you can.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: A clear, one-paragraph description.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What you expected the loop (or the menu bar) to do, and what it did.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happened
+      options:
+        - the overnight loop (ghost on / cards)
+        - live driving (ghost drive / menu bar)
+        - enrollment (join / adopt / picker)
+        - the CLI itself
+        - somewhere else
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: The card / scenario
+      description: The task card JSON (redact paths/secrets), the pane state, or the exact commands run.
+      render: json
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Paste the output of `ghost doctor`, plus `node --version` and your Ghost Type commit.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt
+      description: Relevant lines from `ghost logs 50` (secrets are scrubbed at write time, but double-check).
+      render: text

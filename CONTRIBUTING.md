@@ -36,3 +36,8 @@ node --test test/watcher.test.mjs   # a single file
 - `test/` — one test file per module + the offline `fake-claude.mjs` engine.
 - `docs/superpowers/specs/` — the design. Read it before changing agent-facing behavior.
 - `docs/superpowers/plans/` — the per-milestone implementation plans.
+
+## Outside contributions
+
+See the "About contributions" note at the end of the README — issues and bug reports
+welcome; PRs are reviewed by an agent and re-implemented rather than merged directly.
